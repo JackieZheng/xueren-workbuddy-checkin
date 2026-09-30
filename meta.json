@@ -1,0 +1,15 @@
+{
+  "id": "xueren-workbuddy-checkin",
+  "name": "雪人老师·WorkBuddy签到助手",
+  "version": "1.0.1",
+  "author": "雪人",
+  "platforms": [
+    "ima",
+    "WorkBuddy",
+    "QClaw"
+  ],
+  "description": "WorkBuddy 每日自动签到 + 派猫猫旅行 + 多渠道推送（标准库零依赖）",
+  "github": "https://github.com/JackieZheng/xueren-workbuddy-checkin",
+  "agent_created": true,
+  "updated_at": "2026-09-29"
+}

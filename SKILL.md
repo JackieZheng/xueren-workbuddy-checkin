@@ -7,7 +7,7 @@ slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
 description_en: Auto daily-checkin on WorkBuddy via official API, plus cat trip and multi-channel push.
-version: 1.0.3
+version: 1.0.5
 author: 雪人
 license: MIT
 allowed-tools: ""

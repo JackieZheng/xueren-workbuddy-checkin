@@ -16,6 +16,21 @@ $log    = Join-Path $wbRoot "scripts\boot_checkin.log"
 # 仅追加时间戳头，避免日志无限膨胀（保留最近几次）
 Add-Content -Path $log -Value ("`n===== boot_checkin @ " + (Get-Date -Format "yyyy-MM-dd HH:mm:ss") + " =====")
 
+# 右下角气泡：无窗口启动后让用户知道自动签到已在后台运行（失败静默，不影响签到）
+function Show-Balloon($title, $msg) {
+    try {
+        Add-Type -AssemblyName System.Windows.Forms
+        Add-Type -AssemblyName System.Drawing
+        $ni = New-Object System.Windows.Forms.NotifyIcon
+        $ni.Icon    = [System.Drawing.SystemIcons]::Information
+        $ni.Visible = $true
+        $ni.ShowBalloonTip(5000, $title, $msg, [System.Windows.Forms.ToolTipIcon]::Info)
+        Start-Sleep -Seconds 6
+        $ni.Dispose()
+    } catch { }
+}
+Show-Balloon "WorkBuddy 自动签到" "已在后台静默启动，正在等待客户端就绪…"
+
 # 最多等待 180 秒让 WorkBuddy 进程出现
 $waited = 0
 while ($waited -lt 180) {

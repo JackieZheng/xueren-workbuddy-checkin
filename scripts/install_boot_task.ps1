@@ -4,10 +4,11 @@
 $ErrorActionPreference = "Stop"
 
 $taskName = "WorkBuddy签到-开机补签"
-$ps1      = Join-Path $env:USERPROFILE ".workbuddy\scripts\boot_checkin.ps1"
+# VBS 静默启动器：窗口样式 0 完全无窗口（powershell 直启在部分场景会闪窗/驻留）
+$vbs      = Join-Path $env:USERPROFILE ".workbuddy\scripts\boot_checkin.vbs"
 
-$action = New-ScheduledTaskAction -Execute "powershell.exe" `
-    -Argument ("-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File " + $ps1)
+$action = New-ScheduledTaskAction -Execute "wscript.exe" `
+    -Argument ("//B """ + $vbs + """")
 $trigger = New-ScheduledTaskTrigger -AtLogOn
 
 Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger -Force | Out-Null

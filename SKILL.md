@@ -7,14 +7,14 @@ slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
 description_en: Auto daily-checkin on WorkBuddy via official API, plus cat trip and multi-channel push.
-version: 1.0.7
+version: 1.0.8
 author: 雪人
 license: MIT
 allowed-tools: ""
 display_name: xueren-workbuddy-checkin
 display_name_zh: 雪人老师·WorkBuddy签到助手
 trigger: ["每天自动签到 WorkBuddy", "每日签到", "自动领 Buddy 加油站积分", "WorkBuddy 打卡", "派猫猫旅行", "查下当前积分情况", "积分", "查询积分", "剩余积分", "我的积分", "余额", "当前余额", "签到通知", "5.6.2 签到失败", "登录态加密了"]
-examples: "用户说「每天自动签到 WorkBuddy」→ 把 scripts/ 下脚本落位到 ~/.workbuddy/scripts/，建每日 09:00 主签到自动化，并布置开机补签触发器（将 boot_checkin.ps1 经启动文件夹 .bat 或计划任务 onlogon 在登录时触发）；用户说「查下当前积分情况」→ 跑 --check-only，返回本期活动累计积分与账户可用余额；用户说「派猫猫旅行」→ 跑 travel 子命令。"
+examples: "用户说「每天自动签到 WorkBuddy」→ 把 scripts/ 下脚本落位到 ~/.workbuddy/scripts/，建每日 09:00 主签到自动化，并布置开机补签触发器（将 boot_checkin.vbs 静默启动器经启动文件夹或计划任务 onlogon 在登录时触发，无窗口+气泡提示）；用户说「查下当前积分情况」→ 跑 --check-only，返回本期活动累计积分与账户可用余额；用户说「派猫猫旅行」→ 跑 travel 子命令。"
 platforms: [ima, WorkBuddy, QClaw]
 github: https://github.com/JackieZheng/xueren-workbuddy-checkin
 skillhub: https://skillhub.cn/skills/indiv-xueren/xueren-workbuddy-checkin
@@ -47,7 +47,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 ## 你的工作方式
 
 1. **落位与校验** — 把 `scripts/` 下 `workbuddy_checkin.py` 与 `push_message.py` 一起复制到 `~/.workbuddy/scripts/`（两文件必须同目录），跑 `--check-only` 验证 token 有效、接口通；可顺带 `--diagnose` 看环境自检。
-2. **建触发器** — 用 `automation_update` 建每天 09:00「每日自动签到」recurring 自动化（兜底：电脑全天不关机不重启时仍每日签到）；另建**开机补签触发器**：将 `scripts/boot_checkin.ps1`（等待 WorkBuddy 启动后执行 `boot-catchup`）经「启动文件夹 .bat」或「计划任务 onlogon」在用户登录时触发（替代原 09:05 定时自动化）。提示词见 `@references/examples.md`。
+2. **建触发器** — 用 `automation_update` 建每天 09:00「每日自动签到」recurring 自动化（兜底：电脑全天不关机不重启时仍每日签到）；另建**开机补签触发器**：将 `scripts/boot_checkin.ps1`（等待 WorkBuddy 启动后执行 `boot-catchup`，启动即发右下角气泡提示）经「启动文件夹 .vbs 静默启动器」或「计划任务 onlogon」在用户登录时触发（替代原 09:05 定时自动化）。提示词见 `@references/examples.md`。
 3. **汇报与交付** — 按脚本输出的 JSON 脱敏汇报（action / travel / balance / account_balance）；绝不回显 token 或推送凭据；如需手机推送，指导用户配置 `~/.workbuddy/scripts/notify_config.json`（模板见 `templates/notify_config.json.example`）。
 
 ## 执行流程
@@ -70,7 +70,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 - 状态文件 `~/.workbuddy/scripts/checkin_status.json` 记录"今日是否已成功执行签到"（主 09:00 自动化与 boot-catchup 都会写入）。
 - 子命令 `boot-catchup`：**不依赖固定时刻**，由系统层在「电脑开机/用户登录、WorkBuddy 启动后」触发。逻辑：若本地状态显示今日已成功 → 直接跳过（避免同天多次弹窗/重派）；否则跑一次完整签到闭环（签到 + 派猫猫旅行），服务端当天已签则 `skip_already_signed`（不重复加分），且仅在产生新动作时弹窗。
 - 启动器 `scripts/boot_checkin.ps1` 会先等待 `WorkBuddy.exe` 进程出现（最多 180s，因 5.6.2+ 加密登录态的解密可能需要运行中的进程内存密钥），再执行 `boot-catchup`；超时未等到也仍尝试（走环境变量/DPAPI/密钥文件兜底）。
-- 触发器布置二选一（都幂等，冗余无害）：① 用 PowerShell 跑一次 `scripts/install_boot_task.ps1` 注册「计划任务（AtLogOn）」；② 或把 `WorkBuddy-boot-checkin.bat`（调用上面的 ps1）放进「启动」文件夹（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`）。推荐两者都做：计划任务更稳，启动文件夹作兜底。
+- 触发器布置二选一（都幂等，冗余无害）：① 用 PowerShell 跑一次 `scripts/install_boot_task.ps1` 注册「计划任务（AtLogOn，Action=wscript 跑 VBS）」；② 或把 `boot_checkin.vbs` 放进「启动」文件夹（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`）。推荐两者都做：计划任务更稳，启动文件夹作兜底。
 
 ### Phase 3：输出与交付
 
@@ -93,7 +93,8 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 ### scripts/
 - `workbuddy_checkin.py`：签到 + 派猫猫旅行主流程（含雪人定制的真实余额与 boot-catchup）。
 - `push_message.py`：12 渠道推送模块（被主脚本按同目录导入，也可独立运行：`push_message.py --ready` 列就绪渠道）。
-- `boot_checkin.ps1`：开机补签启动器（等待 `WorkBuddy.exe` 进程后调用 `boot-catchup`），由「启动文件夹 .bat」或「计划任务 onlogon」在登录时触发。
+- `boot_checkin.vbs`：**静默启动器**（窗口样式 0，完全无窗口；由「启动文件夹」或「计划任务」在登录时触发，内部异步拉起 ps1）。不要用 .bat 直启——cmd 宿主窗口在脚本等待 WorkBuddy 期间（最长 3 分钟）会持续可见。
+- `boot_checkin.ps1`：开机补签启动器（先发右下角气泡告知"已后台启动"，再等待 `WorkBuddy.exe` 进程、调用 `boot-catchup`；气泡失败静默不影响签到）。
 - `install_boot_task.ps1`：一键注册「计划任务（AtLogOn）」的 PowerShell 脚本（重跑可覆盖）。
 
 ### references/
@@ -125,7 +126,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 
 - **雪人定制与上游的差异**：本技能脚本为 v3.1.2 的雪人分支（内部版本号 `3.1.2-xueren`），仅新增"账户真实可用余额"与"开机补签"两项，未改动签到/旅行/推送主逻辑；若 WorkBuddy 服务端接口变更，需回到 `@references/api-spec.md` 核对并同步上游修复。
 - **余额口径务必分清**：`balance` = 本期活动累计积分（`total_credits`，每天 +100 累加，非账户余额）；`account_balance` = 账户真实可用余额（取自 `get-user-resource-summary`，带小数，随 AI 使用持续扣减）。汇报时两者都给、不混淆。
-- **开机补签触发器（已改为系统层）**：补签不再依赖 WorkBuddy 自动化引擎的固定时刻，而由 Windows「启动文件夹 .bat」与/或「计划任务 onlogon」在用户登录时触发，电脑开机即签；脚本层面幂等安全、本地今日已成功则跳过，不会重复加分。登录态解密（5.6.2+）可能需 WorkBuddy 运行中（进程内存密钥），启动器已内置"等待 WorkBuddy.exe"逻辑，故请保持 WorkBuddy 开机自启（默认即如此）。
+- **开机补签触发器（已改为系统层无感启动）**：补签不再依赖 WorkBuddy 自动化引擎的固定时刻，而由 Windows「启动文件夹 .vbs 静默启动器」与/或「计划任务 onlogon（Action=wscript 跑 VBS）」在用户登录时触发，**全程无控制台窗口**，启动即右下角气泡提示；脚本层面幂等安全、本地今日已成功则跳过，不会重复加分。登录态解密（5.6.2+）可能需 WorkBuddy 运行中（进程内存密钥），启动器已内置"等待 WorkBuddy.exe"逻辑，故请保持 WorkBuddy 开机自启（默认即如此）。
 - **微信推送已搁置**：按用户要求，个人微信推送（PushPlus/小程序原生订阅消息）不再跟进，脚本保留占位但不启用，汇报中不再列为待办。
 - **安全约束**：只读登录态，绝不修改/删除/外传 token；任何输出不得含真实 token 或推送凭据；写操作仅限 `daily-checkin`、`travel/claim`、`travel/depart` 三个端点；不引入第三方 SDK；不在网页版尝试签到。
 - **排错要点**：`code=10001` 是已签非错误；404 必是域名/前缀错（签到带 `/v2`、旅行不带且域名为 `www.workbuddy.cn`）；推送没发先 `--diagnose` 看 `notify_config.ready`；5.6.2+ 解不开密钥确保客户端已启动登录且与脚本同用户。

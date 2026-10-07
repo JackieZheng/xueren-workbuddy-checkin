@@ -1318,7 +1318,7 @@ def _win_toast(title, body):
           "$n.Icon=[System.Drawing.SystemIcons]::Information;"
           "$n.Visible=$true;"
           "$n.ShowBalloonTip(5000,'%s','%s','Info');"
-          "Start-Sleep -Milliseconds 150;"
+          "Start-Sleep -Milliseconds 1200;"
           "$n.Dispose()") % (safe_title, safe_body)
     subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],

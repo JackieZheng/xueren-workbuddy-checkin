@@ -44,3 +44,9 @@ test_*
 *_probe.py
 *_test.py
 *_tests.py
+*.log
+*.orig
+*.swp
+*~
+*.bak
+*.bak.*

@@ -7,14 +7,14 @@ slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
 description_en: Auto daily-checkin on WorkBuddy via official API, plus cat trip and multi-channel push.
-version: 1.0.9
+version: 1.0.10
 author: 雪人
 license: MIT
 allowed-tools: ""
 display_name: xueren-workbuddy-checkin
 display_name_zh: 雪人老师·WorkBuddy签到助手
 trigger: ["每天自动签到 WorkBuddy", "每日签到", "自动领 Buddy 加油站积分", "WorkBuddy 打卡", "派猫猫旅行", "查下当前积分情况", "积分", "查询积分", "剩余积分", "我的积分", "余额", "当前余额", "签到通知", "5.6.2 签到失败", "登录态加密了"]
-examples: "用户说「每天自动签到 WorkBuddy」→ 把 scripts/ 下脚本落位到 ~/.workbuddy/scripts/，建每日 09:00 主签到自动化，并布置开机补签触发器（将 boot_checkin.vbs 静默启动器经启动文件夹或计划任务 onlogon 在登录时触发，无窗口+气泡提示）；用户说「查下当前积分情况」→ 跑 --check-only，返回本期活动累计积分与账户可用余额；用户说「派猫猫旅行」→ 跑 travel 子命令。"
+examples: "用户说「每天自动签到 WorkBuddy」→ 把 scripts/ 下脚本落位到 ~/.workbuddy/scripts/，建每日 09:00 主签到自动化，并跑一次 install_boot_task.ps1（自动清理旧弹窗 + 以 wscript //B 无窗口 .lnk 布置开机补签，无窗口+气泡提示）；用户说「查下当前积分情况」→ 跑 --check-only，返回本期活动累计积分与账户可用余额；用户说「派猫猫旅行」→ 跑 travel 子命令；用户说「升级后还有开机弹窗」→ 重跑 install_boot_task.ps1 即可自动清除遗留窗口。"
 platforms: [ima, WorkBuddy, QClaw]
 github: https://github.com/JackieZheng/xueren-workbuddy-checkin
 skillhub: https://skillhub.cn/skills/indiv-xueren/xueren-workbuddy-checkin
@@ -70,7 +70,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 - 状态文件 `~/.workbuddy/scripts/checkin_status.json` 记录"今日是否已成功执行签到"（主 09:00 自动化与 boot-catchup 都会写入）。
 - 子命令 `boot-catchup`：**不依赖固定时刻**，由系统层在「电脑开机/用户登录、WorkBuddy 启动后」触发。逻辑：若本地状态显示今日已成功 → 直接跳过（避免同天多次弹窗/重派）；否则跑一次完整签到闭环（签到 + 派猫猫旅行），服务端当天已签则 `skip_already_signed`（不重复加分），且仅在产生新动作时弹窗。
 - 启动器 `scripts/boot_checkin.ps1` 会先等待 `WorkBuddy.exe` 进程出现（最多 180s，因 5.6.2+ 加密登录态的解密可能需要运行中的进程内存密钥），再执行 `boot-catchup`；超时未等到也仍尝试（走环境变量/DPAPI/密钥文件兜底）。
-- 触发器布置二选一（都幂等，冗余无害）：① 用 PowerShell 跑一次 `scripts/install_boot_task.ps1` 注册「计划任务（AtLogOn，Action=wscript 跑 VBS）」；② 或把 `boot_checkin.vbs` 放进「启动」文件夹（`%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`）。推荐两者都做：计划任务更稳，启动文件夹作兜底。
+- **触发器布置（升级/重装必跑一次）**：用 PowerShell 跑 `scripts/install_boot_task.ps1`（内部调用 `setup_boot_checkin.ps1`）。该脚本做两件事：①**自动清除一切遗留的可见窗口启动项**——旧计划任务（任务名/动作含 checkin|workbuddy|签到）、注册表 Run/RunOnce 里相关值、启动文件夹里的 `*.bat|*.cmd|*.vbs|*.lnk|*.exe` 签到项；②在「启动」文件夹部署**唯一、绝对无窗口**的 `WorkBuddy-boot-checkin.lnk`，其目标为 `wscript.exe //B boot_checkin.vbs`（显式用 GUI 宿主拉起，不依赖 `.vbs` 文件关联，彻底杜绝 cscript 关联导致的命令窗口）。**今后每次升级重跑本脚本即可自动消除旧版弹窗**，无需手动排查。
 
 ### Phase 3：输出与交付
 
@@ -93,9 +93,9 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 ### scripts/
 - `workbuddy_checkin.py`：签到 + 派猫猫旅行主流程（含雪人定制的真实余额与 boot-catchup）。
 - `push_message.py`：12 渠道推送模块（被主脚本按同目录导入，也可独立运行：`push_message.py --ready` 列就绪渠道）。
-- `boot_checkin.vbs`：**静默启动器**（窗口样式 0，完全无窗口；由「启动文件夹」或「计划任务」在登录时触发，内部异步拉起 ps1）。不要用 .bat 直启——cmd 宿主窗口在脚本等待 WorkBuddy 期间（最长 3 分钟）会持续可见。
+- `boot_checkin.vbs`：**静默启动器**（窗口样式 0，完全无窗口；由 `setup_boot_checkin.ps1` 生成的「启动」文件夹 `.lnk` 以 `wscript.exe //B` 显式拉起，不依赖 `.vbs` 文件关联，杜绝 cscript 弹命令窗口）。不要用 .bat 直启——cmd 宿主窗口在脚本等待 WorkBuddy 期间（最长 3 分钟）会持续可见。
 - `boot_checkin.ps1`：开机补签启动器（先发右下角气泡告知"已后台启动"，再等待 `WorkBuddy.exe` 进程、调用 `boot-catchup`；气泡失败静默不影响签到）。
-- `install_boot_task.ps1`：一键注册「计划任务（AtLogOn）」的 PowerShell 脚本（重跑可覆盖）。
+- `install_boot_task.ps1` / `setup_boot_checkin.ps1`：开机补签「安装/升级自动清理 + 无窗口加固」脚本。`setup_boot_checkin.ps1` 负责清除遗留可见窗口启动项并部署无窗口 `.lnk`；`install_boot_task.ps1` 为其兼容入口（重跑可覆盖，幂等）。
 
 ### references/
 - `api-spec.md`：接口规范、登录态格式、字段与错误码、推送模块接口。

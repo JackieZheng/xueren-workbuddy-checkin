@@ -7,7 +7,7 @@ slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
 description_en: Auto daily-checkin on WorkBuddy via official API, plus cat trip and multi-channel push.
-version: 1.0.10
+version: 1.0.12
 author: 雪人
 license: MIT
 allowed-tools: ""
@@ -69,7 +69,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 **雪人定制②｜开机补签（boot-catchup）**：
 - 状态文件 `~/.workbuddy/scripts/checkin_status.json` 记录"今日是否已成功执行签到"（主 09:00 自动化与 boot-catchup 都会写入）。
 - 子命令 `boot-catchup`：**不依赖固定时刻**，由系统层在「电脑开机/用户登录、WorkBuddy 启动后」触发。逻辑：若本地状态显示今日已成功 → 直接跳过（避免同天多次弹窗/重派）；否则跑一次完整签到闭环（签到 + 派猫猫旅行），服务端当天已签则 `skip_already_signed`（不重复加分），且仅在产生新动作时弹窗。
-- 启动器 `scripts/boot_checkin.ps1` 会先等待 `WorkBuddy.exe` 进程出现（最多 180s，因 5.6.2+ 加密登录态的解密可能需要运行中的进程内存密钥），再执行 `boot-catchup`；超时未等到也仍尝试（走环境变量/DPAPI/密钥文件兜底）。
+- 启动器 `scripts/boot_checkin.ps1` 采用**持续轮询**策略：每 30s 检测一次 `WorkBuddy.exe` 是否就绪，**WB 未起时只轮询不空跑**（避免在客户端内存密钥缺失时反复调接口触发限流），**就绪后**执行 `boot-catchup`；**最长轮询 30 分钟**，到顶未成功则静默退出。如此无论客户端何时启动（如开机后 9 分钟才起），都能在窗口内被轮询命中并完成补签，彻底解决旧版「固定 180s 倒计时放弃」导致客户端晚启动就错过的问题。
 - **触发器布置（升级/重装必跑一次）**：用 PowerShell 跑 `scripts/install_boot_task.ps1`（内部调用 `setup_boot_checkin.ps1`）。该脚本做两件事：①**自动清除一切遗留的可见窗口启动项**——旧计划任务（任务名/动作含 checkin|workbuddy|签到）、注册表 Run/RunOnce 里相关值、启动文件夹里的 `*.bat|*.cmd|*.vbs|*.lnk|*.exe` 签到项；②在「启动」文件夹部署**唯一、绝对无窗口**的 `WorkBuddy-boot-checkin.lnk`，其目标为 `wscript.exe //B boot_checkin.vbs`（显式用 GUI 宿主拉起，不依赖 `.vbs` 文件关联，彻底杜绝 cscript 关联导致的命令窗口）。**今后每次升级重跑本脚本即可自动消除旧版弹窗**，无需手动排查。
 
 ### Phase 3：输出与交付
@@ -94,7 +94,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 - `workbuddy_checkin.py`：签到 + 派猫猫旅行主流程（含雪人定制的真实余额与 boot-catchup）。
 - `push_message.py`：12 渠道推送模块（被主脚本按同目录导入，也可独立运行：`push_message.py --ready` 列就绪渠道）。
 - `boot_checkin.vbs`：**静默启动器**（窗口样式 0，完全无窗口；由 `setup_boot_checkin.ps1` 生成的「启动」文件夹 `.lnk` 以 `wscript.exe //B` 显式拉起，不依赖 `.vbs` 文件关联，杜绝 cscript 弹命令窗口）。不要用 .bat 直启——cmd 宿主窗口在脚本等待 WorkBuddy 期间（最长 3 分钟）会持续可见。
-- `boot_checkin.ps1`：开机补签启动器（先发右下角气泡告知"已后台启动"，再等待 `WorkBuddy.exe` 进程、调用 `boot-catchup`；气泡失败静默不影响签到）。
+- `boot_checkin.ps1`：开机补签启动器（先发右下角气泡告知"已后台启动"，再**持续轮询** `WorkBuddy.exe` 是否就绪——未起只轮询不空跑、就绪即跑 `boot-catchup`，最长 30 分钟，成功即停；气泡失败静默不影响签到）。
 - `install_boot_task.ps1` / `setup_boot_checkin.ps1`：开机补签「安装/升级自动清理 + 无窗口加固」脚本。`setup_boot_checkin.ps1` 负责清除遗留可见窗口启动项并部署无窗口 `.lnk`；`install_boot_task.ps1` 为其兼容入口（重跑可覆盖，幂等）。
 
 ### references/

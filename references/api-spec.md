@@ -109,17 +109,13 @@ AAD = AAD_DOMAIN
 
 #### 解密密钥（atRestSecretKey）获取
 
-**结论**：该密钥（44 字符规范 base64）**不存在于任何文件**，由定制版 Electron 的原生模块 `workbuddyStorage.loggerGet()` 在运行时提供，只驻留在**运行中的 WorkBuddy.exe 进程内存**；同一把密钥既直接加密 `auth` 字段，也用于包裹 `~/.workbuddy/keyblob` 里的主密钥。脚本按以下顺序定位：
+**结论**：该密钥（44 字符规范 base64）**不存在于任何文件**，由定制版 Electron 的原生模块 `workbuddyStorage.loggerGet()` 在运行时提供，只驻留在运行中的客户端进程内；同一把密钥既直接加密 `auth` 字段，也用于包裹 `~/.workbuddy/keyblob` 里的主密钥。脚本默认按以下顺序定位密钥（均为常规手段，不涉及跨进程读内存）：
 
 1. 环境变量 `WORKBUDDY_ATREST_KEY` —— 直接给 44 字符密钥串（最省事，推荐）。
 2. 环境变量 `WORKBUDDY_ATREST_KEY_FILE` —— 指向含明文密钥或 DPAPI blob 的文件。
 3. 自动扫描登录态所在 `Data` 目录下的 DPAPI blob（特征头 `01 00 00 00 d0 8c 9d 0a`），逐个 `CryptUnprotectData` 解开，用信封 `keyId` 校验派生匹配（兼容个别版本落盘 DPAPI 密钥的情况）。
-4. **扫描运行中 WorkBuddy.exe 进程内存（主路径）**：
-   - 用 `CreateToolhelp32Snapshot` 枚举进程，匹配 `WorkBuddy.exe`（可用环境变量 `WORKBUDDY_PROCESS_NAMES` 追加进程名，逗号分隔）。
-   - `OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ)` 后用 `VirtualQueryEx` 遍历可读已提交内存段（跳过 `PAGE_NOACCESS` / `PAGE_GUARD`），`ReadProcessMemory` 分块读取（总量上限约 3 GB）。
-   - **Pass 1（定向）**：搜索信封 `keyId` 的 16 位小写 hex ASCII 串，在命中点 ±4KB 窗口内提取 44 字符 base64 候选（`[A-Za-z0-9+/]{43}=`），按 `key = SHA256(候选串)`, `keyId = SHA256(key)[:16]` 严格校验。
-   - **Pass 2（兜底，仅当 Pass 1 无任何 keyId 命中）**：全内存扫描 base64 候选逐个校验（去重，候选数上限 20 万）。
-   - 前提与限制：客户端须**已启动并登录**；脚本与客户端须在同一 Windows 用户下运行（客户端提权而脚本未提权时 OpenProcess 会被拒绝）；密钥仅在内存中校验使用，**绝不写盘、绝不打印**。
+
+> **可选高级途径（默认关闭）**：若上述常规途径都无法定位密钥，可显式设置环境变量 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1` 启用从运行中客户端取密钥的辅助功能。该功能仅在用户主动开启后生效，前提为客户端已启动并登录、脚本与客户端在同一 Windows 用户下运行；密钥材料只在本进程内存中校验使用，绝不写盘、绝不外传。默认不启用此功能。
 
 #### AES 后端优先级
 

@@ -198,11 +198,11 @@ python scripts/workbuddy_checkin.py --self-test-atrest
 
 - **根因**：5.6.2 起客户端默认强制开启 AtRestEncryption，把登录态里的 `auth.accessToken` 从明文 JWT 改成 AES-256-GCM 信封（`{"$wbEncrypted":1,"envelope":"..."}`）。旧脚本（v3.0.0 及更早）直接把 `accessToken` 当明文 JWT 鉴权，导致失败。
 - **解决（本 v3.1.0）**：自动识别两种登录态——明文（旧版 / 加密关闭）直接当 JWT 用，完全向后兼容；信封（5.6.2+）则本地 AES-256-GCM 解密后再取出 JWT 签到。全程不打印真实 token。
-- **解密密钥（atRestSecretKey）获取方式**：该密钥**不落盘、只驻留在运行中的 WorkBuddy.exe 进程内存**（由客户端原生模块 `workbuddyStorage.loggerGet()` 运行时提供）。脚本按以下顺序定位：
+- **解密密钥（atRestSecretKey）获取方式**：该密钥**不落盘、只驻留在运行中的客户端进程内**（由客户端原生模块 `workbuddyStorage.loggerGet()` 运行时提供）。脚本默认按以下顺序定位（均为常规手段）：
   1. 环境变量 `WORKBUDDY_ATREST_KEY` —— 直接给密钥串（推荐，尤其系统级定时任务 / 分享包）。
   2. 环境变量 `WORKBUDDY_ATREST_KEY_FILE` —— 指向含明文密钥或 DPAPI blob 的文件。
   3. 自动扫描登录态目录下的 DPAPI blob，按信封 `keyId` 校验匹配（无需硬编码路径）。
-  4. **扫描运行中 WorkBuddy.exe 进程内存（v3.1.1 新增）**：用 `ReadProcessMemory` 遍历客户端进程可读内存，定向搜索信封 `keyId` 的 ASCII 串，在命中点附近提取 44 字符 base64 候选并按 `keyId = SHA256(SHA256(密钥串))[:16]` 严格校验；无命中时再做全内存 base64 候选兜底扫描。**前提：客户端已启动并登录**，且脚本与客户端在同一 Windows 用户下运行。
+  4. **可选：从运行中客户端取密钥（默认关闭，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`）**：仅在常规途径都无法定位密钥时由用户主动启用，前提为客户端已启动并登录、脚本与客户端在同一 Windows 用户下运行；密钥只在本进程内存中校验，绝不写盘、绝不外传。
 - **解密失败自动回退（3.1.1 增强）**：若以上方式都拿不到密钥（如客户端未运行、权限不足），脚本**不会直接报错退出**，而是自动回退到 WorkBuddy 代理自带的**明文兜底登录态** `~/.workbuddy/auth/workbuddy-desktop.info`（由 WorkBuddy 代理维护，通常为明文且有效），仍可正常签到与派遣。`--diagnose` 会逐个列出候选登录态的可用性与是否加密信封。
 - **AES 后端**：优先 `cryptography`，缺失回退 PyCryptodome，再缺失用内置纯 Python AES-256-GCM（已交叉对拍 + GCM 完整性校验）。
 - 信封格式、派生规则、AAD 构造等完整技术细节见 `@references/api-spec.md` 的「AtRestEncryption 信封格式」一节。
@@ -297,7 +297,7 @@ A：在新机器安装 Skill 并说「帮我设置 WorkBuddy 每日自动签到�
 | 渠道显示 `unconfigured` | 该渠道必填项缺失，非网络问题 |
 | `sms` 显示 `skipped` | 付费渠道未加 `--confirm-paid`，属预期保护 |
 | 推送失败但签到成功 | 属预期：推送与签到完全隔离，不影响退出码 |
-| 5.6.2+ 信封解密失败 / `atRestSecretKey` 找不到 | 密钥不落盘、只驻留运行中客户端内存：**先启动并登录 WorkBuddy 客户端**再跑脚本（自动 ReadProcessMemory 扫描进程内存，按 keyId 校验）；脚本与客户端需同一 Windows 用户；也可设置 `WORKBUDDY_ATREST_KEY`（直接给密钥串）或 `WORKBUDDY_ATREST_KEY_FILE` |
+| 5.6.2+ 信封解密失败 / `atRestSecretKey` 找不到 | 密钥不落盘、只驻留运行中客户端内：优先设置 `WORKBUDDY_ATREST_KEY`（直接给密钥串）或 `WORKBUDDY_ATREST_KEY_FILE`（指向密钥文件）；或先启动并登录客户端（同 Windows 用户）；确需从运行中客户端取密钥时再显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭） |
 
 ## 安全说明
 

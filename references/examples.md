@@ -261,7 +261,7 @@ workbuddy_checkin.py --confirm-paid                  # 放行付费渠道（短�
 2. **启动文件夹兜底**：把技能包内的 `scripts/WorkBuddy-boot-checkin.bat`（或自建一个调用 `boot_checkin.ps1` 的 .bat）放进
    `%APPDATA%\Microsoft\Windows\Start Menu\Programs\Startup\`，登录时自动运行。
 
-启动器 `boot_checkin.ps1` 会先等待 `WorkBuddy.exe` 出现（最多 180s，因 5.6.2+ 加密登录态解密可能需运行中的进程内存密钥），再执行 `boot-catchup`；本地状态显示今日已成功则直接跳过，不会同天重复弹窗/重派。
+启动器 `boot_checkin.ps1` 会采用持续轮询策略等待 `WorkBuddy.exe` 就绪（每 30s 检测一次，最长 30 分钟；WB 未起时只轮询不空跑，就绪后执行 `boot-catchup`），再执行补签；本地状态显示今日已成功则直接跳过，不会同天重复弹窗/重派。5.6.2+ 加密登录态解密默认通过环境变量/密钥文件/DPAPI 落盘密钥/明文兜底登录态定位密钥；如需从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭）。
 
 ### 卸载 / 暂停
 

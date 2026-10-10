@@ -1,6 +1,7 @@
 ﻿# WorkBuddy 开机补签启动器
 # 由 Windows 计划任务（触发器：AtLogOn，当前用户）在登录时调用。
-# 作用：等待 WorkBuddy 客户端启动（登录态 AtRest 信封解密可能需要运行中的进程内存密钥），
+# 作用：等待 WorkBuddy 客户端启动（5.6.2+ 加密登录态默认通过环境变量/密钥文件/DPAPI 落盘密钥/明文兜底定位密钥；
+#       如需从运行中客户端取密钥，须显式开启 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1，默认关闭），
 #       随后执行签到 + 派猫猫旅行闭环。等待超时后即便 WB 未起也会尝试（走环境变量/DPAPI/密钥文件兜底）。
 
 $ErrorActionPreference = "SilentlyContinue"

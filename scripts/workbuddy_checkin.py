@@ -24,8 +24,8 @@ WorkBuddy签到助手（每日自动签到脚本，接口直签，无需 GUI 点
   本版本新增 load_token() 的「读端」兼容解密（见脚本下部的 AtRestEncryption 解密段）：
   自动识别明文 / 信封两种情况，对信封用从客户端复刻的 AES-256-GCM 算法解密。
   atRestSecretKey 按多级策略自动定位：环境变量 → 密钥文件 → DPAPI blob 扫描 →
-  运行中 WorkBuddy.exe 进程内存扫描（5.6.2 密钥不落盘、只驻留客户端内存时的主路径，
-  需客户端已启动登录且与脚本同一 Windows 用户）。
+  跨进程读运行中客户端内存（默认 opt-in 关闭，须 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1；
+  启用时需客户端已启动登录且与脚本同一 Windows 用户）。
 
 失败推送（可选）：
   若签到结果为 status!=ok，会读取本地配置文件
@@ -230,7 +230,7 @@ def _check_expiry(auth):
 # 5.6.2 起不落盘、只驻留运行中的 WorkBuddy.exe 进程内存（同一把密钥也用于包裹
 # ~/.workbuddy/keyblob 里的主密钥）。因此这里按多级策略自动定位：
 #   环境变量 → 密钥文件 → DPAPI blob 扫描（兼容个别落盘情况）→
-#   ReadProcessMemory 扫描客户端进程内存（keyId 定向 + base64 候选严格校验）。
+#   跨进程读运行中客户端内存（默认 opt-in 关闭，须 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1）。
 # 密钥材料仅在内存中校验使用，绝不写盘、绝不打印。
 # =============================================================================
 
@@ -756,10 +756,29 @@ def _extract_key_near_hits(data, hit_indexes, pattern_len, target_key_id, utf16=
     return None
 
 
-def _discover_at_rest_key_from_memory(target_key_id):
-    """扫描运行中 WorkBuddy 客户端进程内存寻找 atRestSecretKey（仅 Windows）。
+def _at_rest_memscan_enabled():
+    """内存扫描是否显式开启（opt-in）。
 
-    策略：
+    默认关闭。仅当用户显式设置了以下任一环境变量时才启用跨进程读内存：
+      - WORKBUDDY_ENABLE_ATREST_MEMSCAN=1
+      - WORKBUDDY_ENABLE_ATREST_MEMSCAN=0（显式关闭）
+    返回 True/False。
+    """
+    flag = os.environ.get("WORKBUDDY_ENABLE_ATREST_MEMSCAN", "").strip().lower()
+    if flag in ("1", "true", "yes", "on"):
+        return True
+    return False
+
+
+def _discover_at_rest_key_from_memory(target_key_id):
+    """扫描运行中 WorkBuddy 客户端进程内存寻找 atRestSecretKey（仅 Windows，默认 opt-in 关闭）。
+
+    ⚠️ 该功能默认关闭，须用户显式设置环境变量 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1 才启用。
+    设计意图：5.6.2+ 登录态为 AES 信封加密，密钥不落盘、只驻留运行中客户端内存；
+    默认路径优先使用环境变量 WORKBUDDY_ATREST_KEY / WORKBUDDY_ATREST_KEY_FILE 或明文兜底登录态。
+    启用本扫描时，前提是客户端已启动并登录、脚本与客户端在同一 Windows 用户下运行。
+
+    策略（仅在 opt-in 启用时执行）：
       Pass 1（定向，快速路径）：搜索信封 keyId 的 ASCII / UTF-16LE 串，
                                 在命中点 ±4KB 窗口内提取 44 字符 canonical base64 候选并校验；
       Pass 2（兜底）：对全部可读内存做 base64 候选（ASCII 与 UTF-16LE）扫描逐个校验。
@@ -771,9 +790,12 @@ def _discover_at_rest_key_from_memory(target_key_id):
       Pass 2，并补齐 UTF-16LE 候选（V8 字符串可能以宽字符驻留），二者共用去重集合与上限。
 
     找到返回密钥字符串；找不到返回 None。任何异常都不向外抛（签到主流程不应因扫描崩溃）。
+    未 opt-in 时直接返回 None（跳过扫描，走 DPAPI/明文兜底/报错路径）。
     """
     if not sys.platform.startswith("win"):
         return None
+    if not _at_rest_memscan_enabled():
+        return None  # 默认 opt-in 关闭，跳过跨进程读内存
     try:
         import ctypes
         from ctypes import wintypes
@@ -845,7 +867,7 @@ def _discover_at_rest_key(target_key_id):
       1) 环境变量 WORKBUDDY_ATREST_KEY（直接给密钥串）
       2) 环境变量 WORKBUDDY_ATREST_KEY_FILE（指向密钥文件）
       3) 扫描登录态所在 Data 目录下的 DPAPI blob，逐个解开并校验 keyId
-      4) 扫描运行中 WorkBuddy.exe 进程内存（5.6.2 密钥只驻留内存、磁盘无落盘文件的可靠途径）
+      4) 跨进程读运行中客户端内存（默认关闭，须 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1 显式开启）
     返回 atRestSecretKey 字符串；找不到则抛 RuntimeError（带可操作提示）。
     """
     # 1) 直接给密钥
@@ -887,25 +909,28 @@ def _discover_at_rest_key(target_key_id):
                     return candidate
             except Exception:
                 continue
-    # 4) 扫描运行中客户端进程内存（5.6.2 的 atRestSecretKey 不落盘、只驻留 WorkBuddy.exe 内存）
-    try:
-        mem_key = _discover_at_rest_key_from_memory(target_key_id)
-    except Exception:
-        mem_key = None
-    if mem_key:
-        return mem_key
+    # 4) 跨进程读运行中客户端内存（opt-in：默认关闭，须 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1）
+    if _at_rest_memscan_enabled():
+        try:
+            mem_key = _discover_at_rest_key_from_memory(target_key_id)
+        except Exception:
+            mem_key = None
+        if mem_key:
+            return mem_key
+        mem_tried_note = " 与跨进程读运行中客户端内存（opt-in 已开启）"
+    else:
+        mem_tried_note = ""
     raise RuntimeError(
         "无法在本机定位 WorkBuddy 5.6.2+ 的 atRestSecretKey"
-        "（已尝试 %d 个 DPAPI blob 与运行中客户端进程内存扫描）。\n"
+        "（已尝试 %d 个 DPAPI blob%s）。\n"
         "可选项：\n"
-        "  (a) 确认 WorkBuddy 客户端已启动并登录（密钥只驻留客户端进程内存，客户端未运行则无法解密），"
-        "且本脚本与客户端在同一 Windows 用户下运行；\n"
-        "  (b) 复制本机登录态所在 Data 目录下由 WorkBuddy 加密的密钥文件，设置环境变量 "
+        "  (a) 复制本机登录态所在 Data 目录下由 WorkBuddy 加密的密钥文件，设置环境变量 "
         "WORKBUDDY_ATREST_KEY_FILE=该文件绝对路径；\n"
-        "  (c) 直接设置 WORKBUDDY_ATREST_KEY=<44字符规范base64>；\n"
+        "  (b) 直接设置 WORKBUDDY_ATREST_KEY=<44字符规范base64>；\n"
+        "  (c) 如需启用跨进程读运行中客户端内存（默认关闭，须显式开启且客户端已启动并登录、"
+        "脚本与客户端同一 Windows 用户下运行）：设置 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1；\n"
         "  (d) 退回 WorkBuddy 5.5.x 客户端（该版本登录态为明文，旧脚本即可用）。\n"
-        "注：客户端以管理员权限运行而本脚本未提权（或相反）时，进程内存扫描会被系统拒绝。"
-        % dpapi_tried)
+        % (dpapi_tried, mem_tried_note))
 
 
 def _candidate_to_at_rest_key(blob_or_text, target_key_id):
@@ -1755,8 +1780,8 @@ def diagnose():
         report["auth"]["found"] = False
         if candidates:
             report["auth"]["hint"] = ("找到登录态文件但均无法读取/解密（5.6.2+ 加密态会自动尝试："
-                                      "DPAPI 落盘密钥 → 运行中 WorkBuddy.exe 进程内存扫描；"
-                                      "请确保客户端已启动并登录，也可设置 WORKBUDDY_ATREST_KEY）")
+                                      "DPAPI 落盘密钥 → 跨进程读运行中客户端内存（须 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1）；"
+                                      "请确保客户端已启动并登录，也可设置 WORKBUDDY_ATREST_KEY 或 WORKBUDDY_ATREST_KEY_FILE）")
         else:
             report["auth"]["hint"] = "未找到登录态文件，请先登录 WorkBuddy 客户端"
 
@@ -1829,8 +1854,8 @@ USAGE = (
     "【v3.1.0 适配】已兼容 WorkBuddy 5.6.2+ 客户端的登录态 AtRestEncryption：\n"
     "  若 auth.accessToken 变为 AES-256-GCM 信封（{$wbEncrypted:1,envelope}），本脚本会自动解密。\n"
     "  解密密钥自动定位顺序：环境变量 WORKBUDDY_ATREST_KEY / WORKBUDDY_ATREST_KEY_FILE\n"
-    "  → DPAPI blob 扫描 → 运行中 WorkBuddy.exe 进程内存扫描（5.6.2 密钥不落盘、\n"
-    "  只驻留客户端内存；此路径需客户端已启动登录且与脚本同一 Windows 用户）。\n"
+    "  → DPAPI blob 扫描 → 跨进程读运行中客户端内存（默认关闭，须 WORKBUDDY_ENABLE_ATREST_MEMSCAN=1；\n"
+    "  启用时需客户端已启动登录且与脚本同一 Windows 用户）。\n"
     "消息推送说明：\n"
     "  支持 12 类渠道：dingtalk/feishu/wecom/wechat(pushplus)/email/sms/qq/slack/telegram/bark/webhook/system。\n"
     "  失败自动推送（配置缺失则静默跳过）；成功播报需 success_notify=true。\n"

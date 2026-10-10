@@ -7,7 +7,7 @@ slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
 description_en: Auto daily-checkin on WorkBuddy via official API, plus cat trip and multi-channel push.
-version: 1.0.12
+version: 1.0.14
 author: 雪人
 license: MIT
 allowed-tools: ""
@@ -60,7 +60,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 ### Phase 2：核心执行
 
 主脚本逻辑（无需打开 WorkBuddy GUI）：
-1. 在 `LOCALAPPDATA` / `APPDATA` / `~/Library/Application Support` / `~/.config`（及 `~/.workbuddy/auth` 兜底）定位登录态，只读取出 `accessToken` 与 `domain`；加密态（5.6.2+）自动 AES-256-GCM 解密（密钥优先环境变量 `WORKBUDDY_ATREST_KEY` / `WORKBUDDY_ATREST_KEY_FILE`，其次进程内存扫描，失败回退明文兜底登录态）。
+1. 在 `LOCALAPPDATA` / `APPDATA` / `~/Library/Application Support` / `~/.config`（及 `~/.workbuddy/auth` 兜底）定位登录态，只读取出 `accessToken` 与 `domain`；加密态（5.6.2+）自动 AES-256-GCM 解密（密钥优先环境变量 `WORKBUDDY_ATREST_KEY` / `WORKBUDDY_ATREST_KEY_FILE`，其次 DPAPI 落盘密钥，失败回退明文兜底登录态；如需从运行中客户端取密钥可显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`，默认关闭）。
 2. 调 `POST https://<domain>/v2/billing/meter/checkin-activity-status`：若 `today_checked_in` → `skip_already_signed` 退出；否则调 `POST https://<domain>/v2/billing/meter/daily-checkin` 领取（已签 `code:10001` 视为安全跳过，不重复发）。
 3. **雪人定制①｜账户真实可用余额**：调 `POST https://<domain>/billing/meter/get-user-resource-summary`（注意**无 `/v2` 前缀**，且签名用登录态 `domain`，与签到同域）对 `data.Packages[].CycleRemainCapacity` 求和（保留 2 位小数）得真实余额；同时保留活动口径 `total_credits` 作"本期活动累计积分"。失败静默返回 None，绝不影响签到。
 4. **派猫猫旅行**（默认随签到）：旅行接口域名为 `https://www.workbuddy.cn`、**无 `/v2` 前缀**——`GET /activity/growth/buddy/travel/status` → `arrived` 领积分 → `idle` 且未达 `daily_limit_reached` 才派；`traveling` 仅展示到达倒计时；不可用时静默降级。
@@ -86,7 +86,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 - **推送配置**：`~/.workbuddy/scripts/notify_config.json`（不存在 → 完全不推送）。`enabled` 总开关；`success_notify: true` 时签到成功也推送（默认 false 仅失败推）。微信推送（PushPlus 中转）按用户要求**暂不启用/已忽略**，无需配置 token。
 - **补签状态文件**：`~/.workbuddy/scripts/checkin_status.json`（开机补签用，主任务成功写入；非脚本源码，不进 skill 目录）。
 - **主脚本参数**：`--check-only`（只读查询）/ `--no-travel`（只签到）/ `travel`（只查旅行）/ `--location N`（1-4 指定地点）/ `--push-channels` / `--confirm-paid`（放行付费短信）/ `--no-notify` / `--diagnose` / `--self-test-atrest` / `--init-config` / `--version` / `boot-catchup`（雪人定制补签）。
-- **AtRestEncryption 密钥**：优先环境变量，其次进程内存扫描（需客户端已启动并登录、同 Windows 用户），失败回退 `~/.workbuddy/auth` 明文兜底登录态。
+- **AtRestEncryption 密钥**：定位顺序为 环境变量 `WORKBUDDY_ATREST_KEY` / `WORKBUDDY_ATREST_KEY_FILE` → DPAPI 落盘密钥 → 明文兜底登录态；如需从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭，需客户端已启动并登录、同 Windows 用户）。
 
 ## 资源目录
 
@@ -126,7 +126,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 
 - **雪人定制与上游的差异**：本技能脚本为 v3.1.2 的雪人分支（内部版本号 `3.1.2-xueren`），仅新增"账户真实可用余额"与"开机补签"两项，未改动签到/旅行/推送主逻辑；若 WorkBuddy 服务端接口变更，需回到 `@references/api-spec.md` 核对并同步上游修复。
 - **余额口径务必分清**：`balance` = 本期活动累计积分（`total_credits`，每天 +100 累加，非账户余额）；`account_balance` = 账户真实可用余额（取自 `get-user-resource-summary`，带小数，随 AI 使用持续扣减）。汇报时两者都给、不混淆。
-- **开机补签触发器（已改为系统层无感启动）**：补签不再依赖 WorkBuddy 自动化引擎的固定时刻，而由 Windows「启动文件夹 .vbs 静默启动器」与/或「计划任务 onlogon（Action=wscript 跑 VBS）」在用户登录时触发，**全程无控制台窗口**，启动即右下角气泡提示；脚本层面幂等安全、本地今日已成功则跳过，不会重复加分。登录态解密（5.6.2+）可能需 WorkBuddy 运行中（进程内存密钥），启动器已内置"等待 WorkBuddy.exe"逻辑，故请保持 WorkBuddy 开机自启（默认即如此）。
+- **开机补签触发器（已改为系统层无感启动）**：补签不再依赖 WorkBuddy 自动化引擎的固定时刻，而由 Windows「启动文件夹 .vbs 静默启动器」与/或「计划任务 onlogon（Action=wscript 跑 VBS）」在用户登录时触发，**全程无控制台窗口**，启动即右下角气泡提示；脚本层面幂等安全、本地今日已成功则跳过，不会重复加分。登录态解密（5.6.2+）默认通过环境变量/密钥文件/DPAPI 落盘密钥/明文兜底登录态定位密钥；如需跨进程从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭，需客户端已启动并登录、同 Windows 用户），启动器已内置「等待 WorkBuddy.exe」逻辑，故请保持 WorkBuddy 开机自启（默认即如此）。
 - **微信推送已搁置**：按用户要求，个人微信推送（PushPlus/小程序原生订阅消息）不再跟进，脚本保留占位但不启用，汇报中不再列为待办。
 - **安全约束**：只读登录态，绝不修改/删除/外传 token；任何输出不得含真实 token 或推送凭据；写操作仅限 `daily-checkin`、`travel/claim`、`travel/depart` 三个端点；不引入第三方 SDK；不在网页版尝试签到。
 - **排错要点**：`code=10001` 是已签非错误；404 必是域名/前缀错（签到带 `/v2`、旅行不带且域名为 `www.workbuddy.cn`）；推送没发先 `--diagnose` 看 `notify_config.ready`；5.6.2+ 解不开密钥确保客户端已启动登录且与脚本同用户。

@@ -6,7 +6,7 @@ description: 读取本机已登录 WorkBuddy 的登录态，直接调用官方�
 slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
-version: 1.3.2
+version: 1.3.3
 author: 雪人
 license: MIT
 display_name: xueren-workbuddy-checkin
@@ -18,6 +18,10 @@ skillhub: https://skillhub.cn/skills/indiv-xueren/xueren-workbuddy-checkin
 ---
 
 # 雪人老师·WorkBuddy签到助手
+
+「查下积分」的可视化效果（积分到期明细，在会话内以彩色卡片 + 明细表展示）：
+
+![积分到期明细效果预览](https://raw.githubusercontent.com/JackieZheng/xueren-workbuddy-checkin/main/assets/preview-credits.png)
 
 ## 配置与参数
 

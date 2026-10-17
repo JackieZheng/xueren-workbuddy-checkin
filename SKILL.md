@@ -2,28 +2,47 @@
 id: xueren-workbuddy-checkin
 name: 雪人老师·WorkBuddy签到助手
 title: 雪人老师·WorkBuddy签到助手
-description: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。同时固化两项雪人定制：账户真实可用余额（取自 get-user-resource-summary，与客户端侧边栏一致）与开机补签（boot-catchup）。当用户说"每天自动签到 WorkBuddy / 每日签到 / 自动领 100 积分 / WorkBuddy 打卡 / 派猫猫旅行 / 查下当前积分情况 / 客户端被更新后签不了 / 5.6.2 签到失败 / 登录态加密了 / 积分 / 查询积分 / 剩余积分 / 我的积分 / 余额 / 当前余额"时触发。不适用于网页版（仅 PC 客户端专属，网页版无签到入口）。
+description: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。同时固化三项雪人定制：账户真实可用余额（取自 get-user-resource-summary，与客户端侧边栏一致）、开机补签（boot-catchup）、积分到期盘点（credits，列出每笔积分的到期时间并按最紧急排序）。当用户说"每天自动签到 WorkBuddy / 每日签到 / 自动领 100 积分 / WorkBuddy 打卡 / 派猫猫旅行 / 查下当前积分情况 / 客户端被更新后签不了 / 5.6.2 签到失败 / 登录态加密了 / 积分 / 查询积分 / 剩余积分 / 我的积分 / 余额 / 当前余额 / 积分到期 / 哪些积分快过期 / 积分还有多久过期"时触发。不适用于网页版（仅 PC 客户端专属，网页版无签到入口）。
 slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
-description_en: Auto daily-checkin on WorkBuddy via official API, plus cat trip and multi-channel push.
-version: 1.0.14
+version: 1.1.1
 author: 雪人
 license: MIT
-allowed-tools: ""
 display_name: xueren-workbuddy-checkin
-display_name_zh: 雪人老师·WorkBuddy签到助手
-trigger: ["每天自动签到 WorkBuddy", "每日签到", "自动领 Buddy 加油站积分", "WorkBuddy 打卡", "派猫猫旅行", "查下当前积分情况", "积分", "查询积分", "剩余积分", "我的积分", "余额", "当前余额", "签到通知", "5.6.2 签到失败", "登录态加密了"]
+trigger: ["每天自动签到 WorkBuddy", "每日签到", "自动领 Buddy 加油站积分", "WorkBuddy 打卡", "派猫猫旅行", "查下当前积分情况", "积分", "查询积分", "剩余积分", "我的积分", "余额", "当前余额", "积分到期", "哪些积分快过期", "积分还有多久过期", "到期时间", "签到通知", "5.6.2 签到失败", "登录态加密了"]
 examples: "用户说「每天自动签到 WorkBuddy」→ 把 scripts/ 下脚本落位到 ~/.workbuddy/scripts/，建每日 09:00 主签到自动化，并跑一次 install_boot_task.ps1（自动清理旧弹窗 + 以 wscript //B 无窗口 .lnk 布置开机补签，无窗口+气泡提示）；用户说「查下当前积分情况」→ 跑 --check-only，返回本期活动累计积分与账户可用余额；用户说「派猫猫旅行」→ 跑 travel 子命令；用户说「升级后还有开机弹窗」→ 重跑 install_boot_task.ps1 即可自动清除遗留窗口。"
 platforms: [ima, WorkBuddy, QClaw]
 github: https://github.com/JackieZheng/xueren-workbuddy-checkin
 skillhub: https://skillhub.cn/skills/indiv-xueren/xueren-workbuddy-checkin
-metadata:
-  author: 雪人
-  category: 自动化
-description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。同时固化两项雪人定制：账户真实可用余额（取自 get-user-resource-summary，与客户端侧边栏一致）与开机补签（boot-catchup）。当用户说"每天自动签到 WorkBuddy / 每日签到 / 自动领 100 积分 / WorkBuddy 打卡 / 派猫猫旅行 / 查下当前积分情况 / 客户端被更新后签不了 / 5.6.2 签到失败 / 登录态加密了 / 积分 / 查询积分 / 剩余积分 / 我的积分 / 余额 / 当前余额"时触发。不适用于网页版（仅 PC 客户端专属，网页版无签到入口）。
+---
+
+# 雪人老师·WorkBuddy签到助手
+
+## 配置与参数
+
+- **脚本落位目录**：`~/.workbuddy/scripts/`（主脚本与 `push_message.py` 必须同目录；只复制主脚本时推送自动降级）。
+- **Python 运行环境**：脚本仅用标准库，Python 3.10+ 即可；系统无 `python` 命令时用托管 Python（如 WorkBuddy 用户目录下的 `.workbuddy/binaries/python/versions/*/python.exe`）或任意已装 Python。
+- **推送配置**：`~/.workbuddy/scripts/notify_config.json`（不存在 → 完全不推送）。`enabled` 总开关；`success_notify: true` 时签到成功也推送（默认 false 仅失败推）。微信推送（PushPlus 中转）按用户要求**暂不启用/已忽略**，无需配置 token。
+- **补签状态文件**：`~/.workbuddy/scripts/checkin_status.json`（开机补签用，主任务成功写入；非脚本源码，不进 skill 目录）。
+- **主脚本参数**：`--check-only`（只读查询）/ `--no-travel`（只签到）/ `travel`（只查旅行）/ `--location N`（1-4 指定地点）/ `--push-channels` / `--confirm-paid`（放行付费短信）/ `--no-notify` / `--diagnose` / `--self-test-atrest` / `--init-config` / `--version` / `boot-catchup`（雪人定制补签）。
+- **AtRestEncryption 密钥**：定位顺序为 环境变量 `WORKBUDDY_ATREST_KEY` / `WORKBUDDY_ATREST_KEY_FILE` → DPAPI 落盘密钥 → 明文兜底登录态；如需从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭，需客户端已启动并登录、同 Windows 用户）。
+
+## 注意事项
+
+- **雪人定制与上游的差异**：本技能脚本为 v3.1.2 的雪人分支（内部版本号 `3.1.2-xueren`），仅新增"账户真实可用余额"与"开机补签"两项，未改动签到/旅行/推送主逻辑；若 WorkBuddy 服务端接口变更，需回到 `@references/api-spec.md` 核对并同步上游修复。
+- **余额口径务必分清**：`balance` = 本期活动累计积分（`total_credits`，每天 +100 累加，非账户余额）；`account_balance` = 账户真实可用余额（取自 `get-user-resource-summary`，带小数，随 AI 使用持续扣减）。汇报时两者都给、不混淆。
+- **开机补签触发器（已改为系统层无感启动）**：补签不再依赖 WorkBuddy 自动化引擎的固定时刻，而由 Windows「启动文件夹 .vbs 静默启动器」与/或「计划任务 onlogon（Action=wscript 跑 VBS）」在用户登录时触发，**全程无控制台窗口**，启动即右下角气泡提示；脚本层面幂等安全、本地今日已成功则跳过，不会重复加分。登录态解密（5.6.2+）默认通过环境变量/密钥文件/DPAPI 落盘密钥/明文兜底登录态定位密钥；如需跨进程从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭，需客户端已启动并登录、同 Windows 用户），启动器已内置「等待 WorkBuddy.exe」逻辑，故请保持 WorkBuddy 开机自启（默认即如此）。
+- **微信推送已搁置**：按用户要求，个人微信推送（PushPlus/小程序原生订阅消息）不再跟进，脚本保留占位但不启用，汇报中不再列为待办。
+- **安全约束**：只读登录态，绝不修改/删除/外传 token；任何输出不得含真实 token 或推送凭据；写操作仅限 `daily-checkin`、`travel/claim`、`travel/depart` 三个端点；不引入第三方 SDK；不在网页版尝试签到。
+- **排错要点**：`code=10001` 是已签非错误；404 必是域名/前缀错（签到带 `/v2`、旅行不带且域名为 `www.workbuddy.cn`）；推送没发先 `--diagnose` 看 `notify_config.ready`；5.6.2+ 解不开密钥确保客户端已启动登录且与脚本同用户。
+
+# WORKFLOW · 雪人老师·WorkBuddy签到助手
+
+> 本文件承载 雪人老师·WorkBuddy签到助手 的详细工作流。
 
 ---
+
 
 # 雪人老师·WorkBuddy签到助手
 
@@ -37,6 +56,7 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 3. **多渠道推送 + 桌面通知**：12 类渠道（钉钉/飞书/企业微信/微信/邮件/短信/QQ/Slack/Telegram/Bark/通用 Webhook/系统通知），可配置成功后也推送。
 4. **雪人定制①**：展示**账户真实可用余额**（取自 `get-user-resource-summary`，与客户端侧边栏一致，带小数），并明确区分「本期活动累计积分」(`total_credits`，活动口径) 与「账户可用余额」(真实余额)，不再把活动累计误标为余额。
 5. **雪人定制②**：**开机补签（boot-catchup）**——电脑开机/登录、WorkBuddy 启动后自动触发，确保「今天」完成签到闭环（幂等，服务端当天重复签到有保护，不会重复加分；本地今日已成功则跳过，避免同天多次弹窗/重派）。
+6. **雪人定制③**：**积分到期盘点（credits）**——只读列出每一笔积分的剩余量、到期时间与剩余天数，按最紧急排序，并区分「到期失效」与「周期刷新」，让用户知道哪些积分快过期、该优先用掉。
 
 脚本 `scripts/workbuddy_checkin.py` 仅用 Python 标准库，零第三方依赖；`scripts/push_message.py` 为推送模块（同目录被主脚本导入，也可独立调试）。
 
@@ -75,18 +95,10 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 ### Phase 3：输出与交付
 
 - **积分/余额类查询**（用户说"积分 / 查询积分 / 剩余积分 / 我的积分 / 余额 / 当前余额"等）→ 立即跑 `--check-only` 取实时数据，并**当场在会话窗口**汇报（本期活动累计积分 + 账户可用余额 + 连续签到天数 + 派猫猫旅行状态）；数据严格以本次实查为准，不凭记忆、不猜测。
+- **积分到期查询**（用户说"积分到期 / 哪些积分快过期 / 积分还有多久过期 / 到期时间"等）→ 跑 `credits` 子命令（只读，不签到）。输出 `packages[]` 每笔发放的剩余积分、到期时间、`days_left`、`expire_kind`（`到期失效` / `周期刷新`），已按最紧急排序。汇报时挑出 `days_left` 最小的几笔（尤其 7 天内），并说明总额；`--expiring-days N` 可直接筛 N 天内到期的。数据链路见 `references/api-spec.md` 第 3.5 节。
 - 主流程把结果写入 JSON 的 `action`（`clicked` / `skip_already_signed` / `skip_check_only` / `travel`）、`balance`（本期活动累计积分）、`account_balance`（账户真实可用余额）、`travel` 字段；桌面通知与推送（按 `notify_config.json` 配置）同步展示。
 - 自动化提示词（脱敏汇报规范 + 旅行字段转述 + 失败如实报告）见 `@references/examples.md`，直接复用为 `automation_update` 的 prompt。
 - 交付后提醒用户：当日若已手动签到会自动跳过；每日 09:00 主任务兜底（电脑不关机时仍签到），电脑开机/登录后由开机补签触发器确保当日签到；请在 Buddy 加油站核对 +100。
-
-## 配置与参数
-
-- **脚本落位目录**：`~/.workbuddy/scripts/`（主脚本与 `push_message.py` 必须同目录；只复制主脚本时推送自动降级）。
-- **Python 运行环境**：脚本仅用标准库，Python 3.10+ 即可；系统无 `python` 命令时用托管 Python（如 WorkBuddy 用户目录下的 `.workbuddy/binaries/python/versions/*/python.exe`）或任意已装 Python。
-- **推送配置**：`~/.workbuddy/scripts/notify_config.json`（不存在 → 完全不推送）。`enabled` 总开关；`success_notify: true` 时签到成功也推送（默认 false 仅失败推）。微信推送（PushPlus 中转）按用户要求**暂不启用/已忽略**，无需配置 token。
-- **补签状态文件**：`~/.workbuddy/scripts/checkin_status.json`（开机补签用，主任务成功写入；非脚本源码，不进 skill 目录）。
-- **主脚本参数**：`--check-only`（只读查询）/ `--no-travel`（只签到）/ `travel`（只查旅行）/ `--location N`（1-4 指定地点）/ `--push-channels` / `--confirm-paid`（放行付费短信）/ `--no-notify` / `--diagnose` / `--self-test-atrest` / `--init-config` / `--version` / `boot-catchup`（雪人定制补签）。
-- **AtRestEncryption 密钥**：定位顺序为 环境变量 `WORKBUDDY_ATREST_KEY` / `WORKBUDDY_ATREST_KEY_FILE` → DPAPI 落盘密钥 → 明文兜底登录态；如需从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭，需客户端已启动并登录、同 Windows 用户）。
 
 ## 资源目录
 
@@ -121,12 +133,3 @@ description_zh: 读取本机已登录 WorkBuddy 的登录态，直接调用官�
 4. **不固化的例外**：① 系统自带资源；② 凭据 / API Key / Token —— **绝不写入 skill**，`notify_config.json`（含真实密钥）只存用户本地、不进 skill 目录、不提交仓库；③ 可随时再生的缓存、`__pycache__`、本地运行日志 `checkin.log` 与状态文件 `checkin_status.json`。
 5. **更新即备份**：每次修改 skill 后**自动重新封装并同步**到 `WB Skill 备份目录（用户侧本地技能库）\xueren-workbuddy-checkin\`（目录结构一致，**排除 `__pycache__`**），无需用户另外吩咐。备份库是用户侧权威存档。
 6. **交付前自检**：假设把外部素材目录改名/移走，本 skill 还能跑通吗？不能 → 说明资源没固化到位。
-
-## 注意事项
-
-- **雪人定制与上游的差异**：本技能脚本为 v3.1.2 的雪人分支（内部版本号 `3.1.2-xueren`），仅新增"账户真实可用余额"与"开机补签"两项，未改动签到/旅行/推送主逻辑；若 WorkBuddy 服务端接口变更，需回到 `@references/api-spec.md` 核对并同步上游修复。
-- **余额口径务必分清**：`balance` = 本期活动累计积分（`total_credits`，每天 +100 累加，非账户余额）；`account_balance` = 账户真实可用余额（取自 `get-user-resource-summary`，带小数，随 AI 使用持续扣减）。汇报时两者都给、不混淆。
-- **开机补签触发器（已改为系统层无感启动）**：补签不再依赖 WorkBuddy 自动化引擎的固定时刻，而由 Windows「启动文件夹 .vbs 静默启动器」与/或「计划任务 onlogon（Action=wscript 跑 VBS）」在用户登录时触发，**全程无控制台窗口**，启动即右下角气泡提示；脚本层面幂等安全、本地今日已成功则跳过，不会重复加分。登录态解密（5.6.2+）默认通过环境变量/密钥文件/DPAPI 落盘密钥/明文兜底登录态定位密钥；如需跨进程从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭，需客户端已启动并登录、同 Windows 用户），启动器已内置「等待 WorkBuddy.exe」逻辑，故请保持 WorkBuddy 开机自启（默认即如此）。
-- **微信推送已搁置**：按用户要求，个人微信推送（PushPlus/小程序原生订阅消息）不再跟进，脚本保留占位但不启用，汇报中不再列为待办。
-- **安全约束**：只读登录态，绝不修改/删除/外传 token；任何输出不得含真实 token 或推送凭据；写操作仅限 `daily-checkin`、`travel/claim`、`travel/depart` 三个端点；不引入第三方 SDK；不在网页版尝试签到。
-- **排错要点**：`code=10001` 是已签非错误；404 必是域名/前缀错（签到带 `/v2`、旅行不带且域名为 `www.workbuddy.cn`）；推送没发先 `--diagnose` 看 `notify_config.ready`；5.6.2+ 解不开密钥确保客户端已启动登录且与脚本同用户。

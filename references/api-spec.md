@@ -267,6 +267,39 @@ GET /activity/growth/buddy/travel/config
 
 任一不满足即跳过派遣，**不发任何写请求**。
 
+### 3.6 资源包与积分到期（只读，`credits` 子命令）
+
+积分到期时间**不在** `get-user-resource-summary` 里，必须分两步取：
+
+```
+# 第 1 步：拿包代码（该接口本身只返回用量计数，无任何时间字段）
+POST /billing/meter/get-user-resource-summary
+{}
+→ data.Packages[].PackageCode
+
+# 第 2 步：按包代码查具体发放记录（PackageCodes 必填，缺失返回 400/code=10001）
+POST /billing/meter/get-user-resource-paid-packages
+POST /billing/meter/get-user-resource-free-packages
+{"PageNumber":1,"PageSize":100,"PackageCodes":["<code1>"],"Status":[0,3]}
+→ data.Accounts[]
+```
+
+`Accounts[]` 每条 = **一笔具体发放**（同一 `PackageCode` 会有多条），关键字段：
+
+| 字段 | 含义 |
+|------|------|
+| `DeductionEndTime` | **该笔积分真正失效的时刻**（毫秒时间戳）——到期主依据 |
+| `CycleEndTime` | 周期结束时间（字符串 `YYYY-MM-DD HH:MM:SS`）——循环包按此刷新 |
+| `ExpiredTime` | 兜底字段，**不可当真实到期日**（体验版实测给了 2034 年的占位值） |
+| `CycleCapacityRemainPrecise` / `CycleCapacitySizePrecise` | 该笔剩余 / 总量（精确字符串值） |
+| `Status` | `0`=生效中，`3`=已用完 |
+| `PackageName` / `SubProductName` | 展示名（如「CodeBuddy个人版国内运营裂变包」） |
+
+**取值优先级（实测校准 2026-10-17）**：`DeductionEndTime` → `CycleEndTime` → `ExpiredTime`。
+当 `CycleEndTime` 早于 `DeductionEndTime` 时，该包是**周期刷新**（循环包），脚本标 `expire_kind=周期刷新`，避免误导成"即将过期"。
+
+注意两个接口都走**无 `/v2` 前缀**路径；`/billing/meter/get-user-resource-detail` 等猜测路径均返回 404，不存在更细粒度的单包详情接口。
+
 ---
 
 ## 4. 错误码 / 状态码对照

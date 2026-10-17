@@ -122,7 +122,7 @@ STATUS_PATH = "/billing/meter/checkin-activity-status"
 CHECKIN_PATH = "/billing/meter/daily-checkin"
 HTTP_TIMEOUT = 10
 MAX_RETRY = 1
-VERSION = "3.1.3-xueren"
+VERSION = "3.2.0-xueren"
 
 # 推送渠道覆盖（由命令行 --push-channels 设定，None=用配置里全部已就绪渠道）
 _PUSH_CHANNELS = None
@@ -1145,6 +1145,241 @@ def fetch_account_balance(base, token):
         return None
 
 
+PACKAGES_PATH_PAID = "/billing/meter/get-user-resource-paid-packages"
+PACKAGES_PATH_FREE = "/billing/meter/get-user-resource-free-packages"
+
+
+def _parse_pkg_time(value):
+    """把资源包接口的时间统一解析为 epoch 秒。
+
+    服务端同一字段可能返回三种形态：
+      - "2026-10-18 06:16:35"（字符串，UTC+8 无时区标记）
+      - 1792275395000（13 位毫秒）
+      - 1792275395（10 位秒）
+    解析失败返回 None（绝不抛异常，余额展示不能因单个包崩掉）。
+    """
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        v = float(value)
+        return v / 1000.0 if v > 1e11 else v
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        if s.isdigit():
+            v = float(s)
+            return v / 1000.0 if v > 1e11 else v
+        for fmt in ("%Y-%m-%d %H:%M:%S", "%Y-%m-%dT%H:%M:%S", "%Y-%m-%d"):
+            try:
+                return time.mktime(time.strptime(s[:19], fmt))
+            except ValueError:
+                continue
+    return None
+
+
+def fetch_credit_packages(base, token):
+    """拉取资源包清单及其到期时间（客户端「积分明细」同源）。
+
+    数据链路（实测 2026-10-17）：
+      1) POST /billing/meter/get-user-resource-summary → Packages[].PackageCode（只是包代码清单）
+      2) POST /billing/meter/get-user-resource-{paid,free}-packages（**PackageCodes 必填**）
+         → data.Accounts[]，每个 Account 才是「一笔具体发放」，含
+            DeductionEndTime（该笔积分真正的过期时间）、CycleEndTime（周期结束，按周期刷新）、
+            ExpiredTime、CycleCapacityRemainPrecise（该笔剩余积分）、Status、PackageName 等。
+    summary 接口本身**不返回任何时间字段**，所以到期时间必须走第 2 步。
+
+    返回 (packages, meta)：packages 为按到期时间升序（无到期时间的排最后）的列表，
+    meta 记录查询过程，便于用户判断是真没有还是查失败。
+    """
+    meta = {"summary_ok": False, "package_codes": [], "queried": [], "errors": []}
+    root = base[:-3] if base.endswith("/v2") else base
+
+    # 1) 先拿包代码（paid/free 接口都必须带 PackageCodes，缺参直接 400）
+    try:
+        st, body = api_call(root, RESOURCE_SUMMARY_PATH, token)
+        if st == 200 and isinstance(body, dict) and body.get("code") == 0:
+            meta["summary_ok"] = True
+            data = body.get("data") if isinstance(body.get("data"), dict) else {}
+            for p in data.get("Packages") or []:
+                if isinstance(p, dict) and p.get("PackageCode"):
+                    meta["package_codes"].append(p["PackageCode"])
+        else:
+            meta["errors"].append("资源汇总接口异常：HTTP %s" % st)
+    except Exception as e:
+        meta["errors"].append("资源汇总接口异常：%s" % e)
+    if not meta["package_codes"]:
+        meta["errors"].append("未获取到任何资源包代码，无法查询到期时间")
+        return [], meta
+
+    # 2) 逐包查具体发放记录（paid / free 两条链路都查，任一命中即可）
+    rows = []
+    seen = set()
+    for path in (PACKAGES_PATH_PAID, PACKAGES_PATH_FREE):
+        payload = {"PageNumber": 1, "PageSize": 100,
+                   "PackageCodes": meta["package_codes"], "Status": [0, 3]}
+        try:
+            st, body = api_call(root, path, token, payload=payload)
+        except Exception as e:
+            meta["errors"].append("%s 请求异常：%s" % (path.rsplit("/", 1)[-1], e))
+            continue
+        meta["queried"].append({"path": path.rsplit("/", 1)[-1], "http": st,
+                                "code": body.get("code") if isinstance(body, dict) else None})
+        if st != 200 or not isinstance(body, dict) or body.get("code") != 0:
+            continue
+        data = body.get("data") if isinstance(body.get("data"), dict) else {}
+        for a in data.get("Accounts") or []:
+            if not isinstance(a, dict):
+                continue
+            key = (a.get("AccountId"), a.get("PackageCode"), a.get("CycleStartTime"))
+            if key in seen:
+                continue
+            seen.add(key)
+
+            def _num(*names):
+                for n in names:
+                    v = a.get(n)
+                    if v in (None, ""):
+                        continue
+                    try:
+                        return float(v)
+                    except (TypeError, ValueError):
+                        continue
+                return 0.0
+
+            # 剩余积分优先取精确值（字符串），回退整数列
+            remain = _num("CycleCapacityRemainPrecise", "CycleCapacityRemain")
+            total = _num("CycleCapacitySizePrecise", "CycleCapacitySize")
+            # 到期时间取值顺序（实测校准 2026-10-17）：
+            #   DeductionEndTime（该笔积分真正失效的时刻）→ CycleEndTime（周期结束，循环包按周期刷新）
+            #   → ExpiredTime（仅兜底：体验版包该字段是 2034 年的占位值，不可当真实到期日）
+            expire_src = "deduction"
+            expire_ts = _parse_pkg_time(a.get("DeductionEndTime"))
+            if expire_ts is None:
+                expire_src = "cycle"
+                expire_ts = _parse_pkg_time(a.get("CycleEndTime"))
+            if expire_ts is None:
+                expire_src = "fallback"
+                expire_ts = _parse_pkg_time(a.get("ExpiredTime"))
+            refresh_ts = _parse_pkg_time(a.get("CycleEndTime"))
+            # 循环包（周期结束早于扣减结束）真实节奏是「随周期刷新」，标记出来避免误导成过期
+            rolling = bool(refresh_ts and expire_ts and refresh_ts < expire_ts)
+            status = a.get("Status")
+            rows.append({
+                "account_id": a.get("AccountId"),
+                "package_code": a.get("PackageCode"),
+                "package_name": a.get("PackageName") or "",
+                "sub_product": a.get("SubProductName") or "",
+                "remain": round(remain, 2),
+                "total": round(total, 2),
+                "status": status,
+                "status_text": {0: "生效中", 3: "已用完"}.get(status, "状态%s" % status),
+                "cycle_start": a.get("CycleStartTime") or "",
+                "cycle_end": a.get("CycleEndTime") or "",
+                "expire_at": _fmt_ts(expire_ts),
+                "expire_ts": expire_ts,
+                "expire_source": expire_src,
+                "expire_kind": "周期刷新" if rolling else "到期失效",
+                "refresh_at": _fmt_ts(refresh_ts),
+                "refresh_ts": refresh_ts,
+                "days_left": _days_left(expire_ts),
+            })
+
+    # 3) 排序：未用完的在前、按到期时间升序（最紧急最上）；已用完的沉底
+    def _sort_key(r):
+        used_up = 1 if (r.get("status") == 3 or r.get("remain", 0) <= 0) else 0
+        ts = r.get("expire_ts")
+        return (used_up, 0 if ts else 1, ts or 0)
+    rows.sort(key=_sort_key)
+    return rows, meta
+
+
+def _fmt_ts(ts):
+    if not ts:
+        return None
+    try:
+        return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+    except Exception:
+        return None
+
+
+def _days_left(ts):
+    """距离到期的天数（向下取整；已过期为负数）。"""
+    if not ts:
+        return None
+    return int((ts - time.time()) // 86400)
+
+
+def _arg_int(flag, default):
+    """读取 `--flag N` 形式的整数参数；缺省或非法时返回 default。"""
+    argv = sys.argv[1:]
+    if flag in argv:
+        i = argv.index(flag)
+        if i + 1 < len(argv):
+            try:
+                return int(argv[i + 1])
+            except ValueError:
+                return default
+    return default
+
+
+def cmd_credits(expiring_days=None):
+    """「积分到期」只读命令：列出各资源包剩余积分 + 到期时间，按最紧急排序。
+
+    纯查询，不签到、不领取、不写任何本地状态；不影响签到主流程。
+    """
+    out = {"status": "ok", "action": "credits", "account_balance": None,
+           "total_remaining": 0.0, "packages": [], "expiring_soon": [],
+           "expiring_days": expiring_days, "meta": {}}
+    try:
+        token, domain, _ = load_token_best()
+    except Exception as e:
+        out.update(status="error", msg="读取登录态失败: %s" % e)
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        return 1
+
+    base = "https://" + (domain or "www.codebuddy.cn") + "/v2"
+    out["account_balance"] = fetch_account_balance(base, token)
+    pkgs, meta = fetch_credit_packages(base, token)
+    out["packages"] = pkgs
+    out["meta"] = meta
+    out["total_remaining"] = round(sum(p.get("remain", 0) for p in pkgs), 2)
+
+    if expiring_days is not None:
+        out["expiring_soon"] = [
+            p for p in pkgs
+            if p.get("days_left") is not None and 0 <= p["days_left"] <= expiring_days
+            and p.get("remain", 0) > 0 and p.get("status") != 3
+        ]
+
+    # 人类可读摘要
+    lines = []
+    if not pkgs:
+        lines.append("未取得资源包明细。" + ("；".join(meta.get("errors") or [])))
+    else:
+        live = [p for p in pkgs if p.get("status") != 3 and p.get("remain", 0) > 0]
+        lines.append("账户可用余额 %s，共 %d 个有效资源包（另 %d 个已用完）"
+                     % (out["account_balance"], len(live), len(pkgs) - len(live)))
+        for p in live:
+            dl = p.get("days_left")
+            if dl is None:
+                when = "无到期时间"
+            elif dl < 0:
+                when = "已过期 %d 天" % (-dl)
+            elif dl == 0:
+                when = "今天到期"
+            elif p.get("expire_kind") == "周期刷新":
+                when = "%d 天后周期刷新（%s）" % (dl, p.get("expire_at"))
+            else:
+                when = "%d 天后到期（%s）" % (dl, p.get("expire_at"))
+            lines.append("  · %s 剩余 %s / %s — %s"
+                         % (p.get("package_name") or p.get("package_code"),
+                            p.get("remain"), p.get("total"), when))
+    out["msg"] = "\n".join(lines)
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
 def _extract_balance(*bodies):
     """从接口响应中尽力提取「积分余额」（total / balance 类字段）。
 
@@ -1833,6 +2068,8 @@ USAGE = (
     "  python workbuddy_checkin.py --no-travel           # 只签到，跳过旅行（最快）\n"
     "  python workbuddy_checkin.py --check-only          # 仅查询（只读，不签到也不写旅行；不写补签状态）\n"
     "  python workbuddy_checkin.py travel                # 只查派猫猫旅行状态（只读，不签到）\n"
+    "  python workbuddy_checkin.py credits               # 查积分到期：各资源包剩余积分 + 到期时间（只读，按最紧急排序）\n"
+    "  python workbuddy_checkin.py credits --expiring-days 7   # 只列 7 天内到期的积分\n"
     "  python workbuddy_checkin.py travel --travel-auto  # 只跑旅行闭环（不签到）\n"
     "  python workbuddy_checkin.py --travel-auto         # 显式开启旅行闭环（默认已开）\n"
     "  python workbuddy_checkin.py --location N          # 指定派遣地点（1-4，缺省随机）\n"
@@ -1925,6 +2162,9 @@ def main():
         print(json.dumps(out, ensure_ascii=False, indent=2))
         write_log(out)
         sys.exit(0 if out.get("status") == "ok" else 1)
+    # 积分到期查询（只读）：列出每个资源包的剩余积分与到期时间，按最紧急排序
+    if "credits" in sys.argv[1:] or "--expire" in sys.argv[1:]:
+        sys.exit(cmd_credits(expiring_days=_arg_int("--expiring-days", None)))
     check_only = "--check-only" in sys.argv
     no_notify = "--no-notify" in sys.argv
     travel_only = "travel" in sys.argv[1:]

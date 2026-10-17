@@ -11,5 +11,5 @@
 
 「查下积分」的可视化输出（show_widget 渲染，实际以会话内组件展示）：彩色指标卡 + 单表到期明细（以「使用中」为基准，前后各 10 条），含获取方式、剩余/总量进度条、到期提示与状态标签。
 
-![积分到期明细效果预览](assets/preview-credits.png)
+![积分到期明细效果预览](https://raw.githubusercontent.com/JackieZheng/xueren-workbuddy-checkin/main/assets/preview-credits.png)
 

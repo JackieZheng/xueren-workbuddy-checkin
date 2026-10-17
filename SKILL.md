@@ -6,7 +6,7 @@ description: 读取本机已登录 WorkBuddy 的登录态，直接调用官方�
 slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成「Buddy 加油站」每日签到（无需点击 GUI），并支持派猫猫旅行（查状态 / 领旅行积分 / 派 Buddy 出门，默认随签到跑全自动闭环）+ 12 类多渠道消息推送 + 桌面通知。
-version: 1.1.1
+version: 1.3.1
 author: 雪人
 license: MIT
 display_name: xueren-workbuddy-checkin
@@ -95,7 +95,13 @@ skillhub: https://skillhub.cn/skills/indiv-xueren/xueren-workbuddy-checkin
 ### Phase 3：输出与交付
 
 - **积分/余额类查询**（用户说"积分 / 查询积分 / 剩余积分 / 我的积分 / 余额 / 当前余额"等）→ 立即跑 `--check-only` 取实时数据，并**当场在会话窗口**汇报（本期活动累计积分 + 账户可用余额 + 连续签到天数 + 派猫猫旅行状态）；数据严格以本次实查为准，不凭记忆、不猜测。
-- **积分到期查询**（用户说"积分到期 / 哪些积分快过期 / 积分还有多久过期 / 到期时间"等）→ 跑 `credits` 子命令（只读，不签到）。输出 `packages[]` 每笔发放的剩余积分、到期时间、`days_left`、`expire_kind`（`到期失效` / `周期刷新`），已按最紧急排序。汇报时挑出 `days_left` 最小的几笔（尤其 7 天内），并说明总额；`--expiring-days N` 可直接筛 N 天内到期的。数据链路见 `references/api-spec.md` 第 3.5 节。
+- **积分到期查询**（用户说"积分到期 / 哪些积分快过期 / 积分还有多久过期 / 到期时间"等）→ 跑 `credits` 子命令（只读，不签到）。**最终结果一律用 widget 呈现**（见下条「可视化输出」），不要贴 JSON、也不要贴纯文本表格。
+- **可视化输出（强制）**：`credits` 的最终结果默认用 `show_widget` 展示。做法：跑 `python workbuddy_checkin.py credits --html`，把 stdout 的 HTML 片段原样交给 `show_widget` 的 `widget_code`（含 `--expiring-days N` 也一样）。不要自己重写 HTML，脚本已内置：彩色指标卡（可用余额/使用中/未使用/临期）、单表明细、基准行高亮。
+  - 表格列顺序固定为：**到期时间 → 获取方式 → 剩余/总量 → 到期提示 → 状态**（状态是最后一列）。
+  - 行范围：以「使用中」的记录为基准（按到期时间升序里第一笔正在消耗的），取前 10 条 + 自身 + 后 10 条，最多 21 行；没有使用中的则退到第一笔未使用。超出部分只在表尾注明总数，不再刷屏。
+  - 状态口径：`已用完` = Status=3 或剩余≤0；`使用中` = 0<剩余<总量；`未使用` = 剩余≥总量。基准行是使用中的那行，整行浅绿高亮 + 左侧竖条。
+  - 区分「临期」与「有余额的临期」：7 天内到期的记录里如果剩余为 0，属于已消耗完毕的历史流水，**不要说成"不用即作废"**。
+  - 数据链路见 `references/api-spec.md` 第 3.5 节。
 - 主流程把结果写入 JSON 的 `action`（`clicked` / `skip_already_signed` / `skip_check_only` / `travel`）、`balance`（本期活动累计积分）、`account_balance`（账户真实可用余额）、`travel` 字段；桌面通知与推送（按 `notify_config.json` 配置）同步展示。
 - 自动化提示词（脱敏汇报规范 + 旅行字段转述 + 失败如实报告）见 `@references/examples.md`，直接复用为 `automation_update` 的 prompt。
 - 交付后提醒用户：当日若已手动签到会自动跳过；每日 09:00 主任务兜底（电脑不关机时仍签到），电脑开机/登录后由开机补签触发器确保当日签到；请在 Buddy 加油站核对 +100。

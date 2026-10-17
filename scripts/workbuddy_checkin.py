@@ -122,7 +122,7 @@ STATUS_PATH = "/billing/meter/checkin-activity-status"
 CHECKIN_PATH = "/billing/meter/daily-checkin"
 HTTP_TIMEOUT = 10
 MAX_RETRY = 1
-VERSION = "3.2.0-xueren"
+VERSION = "3.2.1-xueren"
 
 # 推送渠道覆盖（由命令行 --push-channels 设定，None=用配置里全部已就绪渠道）
 _PUSH_CHANNELS = None
@@ -1179,23 +1179,27 @@ def _parse_pkg_time(value):
 
 
 def fetch_credit_packages(base, token):
-    """拉取资源包清单及其到期时间（客户端「积分明细」同源）。
+    """拉取逐笔积分发放记录（对齐官网积分页「到期时间 / 获取方式 / 已用/总量」）。
 
     数据链路（实测 2026-10-17）：
       1) POST /billing/meter/get-user-resource-summary → Packages[].PackageCode（只是包代码清单）
       2) POST /billing/meter/get-user-resource-{paid,free}-packages（**PackageCodes 必填**）
-         → data.Accounts[]，每个 Account 才是「一笔具体发放」，含
-            DeductionEndTime（该笔积分真正的过期时间）、CycleEndTime（周期结束，按周期刷新）、
-            ExpiredTime、CycleCapacityRemainPrecise（该笔剩余积分）、Status、PackageName 等。
+         → data.Accounts[]，每个 Account 才是一笔具体发放，含
+            DeductionEndTime（该笔积分真正失效的时刻，精确到秒）、
+            CycleEndTime（周期结束，循环包按周期刷新）、ExpiredTime（兜底）、
+            CycleCapacityRemainPrecise / CycleCapacitySizePrecise（该笔剩余 / 总量）、
+            Status、AccountAttributes[]（grantReason → 「获取方式」，如「官方活动发放」
+            「Buddy 加油站签到」）。
     summary 接口本身**不返回任何时间字段**，所以到期时间必须走第 2 步。
 
-    返回 (packages, meta)：packages 为按到期时间升序（无到期时间的排最后）的列表，
+    返回 (records, meta)：records 按到期时间升序（最紧急在最上），
     meta 记录查询过程，便于用户判断是真没有还是查失败。
     """
-    meta = {"summary_ok": False, "package_codes": [], "queried": [], "errors": []}
+    meta = {"summary_ok": False, "package_codes": [], "queried": [], "errors": [],
+            "total_count": 0}
     root = base[:-3] if base.endswith("/v2") else base
 
-    # 1) 先拿包代码（paid/free 接口都必须带 PackageCodes，缺参直接 400）
+    # 1) 先拿包代码（paid/free 接口都必须带 PackageCodes，缺参直接 404/400）
     try:
         st, body = api_call(root, RESOURCE_SUMMARY_PATH, token)
         if st == 200 and isinstance(body, dict) and body.get("code") == 0:
@@ -1209,15 +1213,19 @@ def fetch_credit_packages(base, token):
     except Exception as e:
         meta["errors"].append("资源汇总接口异常：%s" % e)
     if not meta["package_codes"]:
-        meta["errors"].append("未获取到任何资源包代码，无法查询到期时间")
+        meta["errors"].append("未获取到任何资源包代码，无法查询到期记录")
         return [], meta
 
-    # 2) 逐包查具体发放记录（paid / free 两条链路都查，任一命中即可）
+    # 2) 逐包查发放记录（paid / free 两条链路都查，任一命中即可）
+    # 注意：**不要**传 OnlyValidPeriod=True——实测（2026-10-17）该参数会把
+    # 「即将到期 / 剩余 0 但仍在有效期」的逐笔记录滤掉，导致临期积分凭空消失，
+    # 与官网积分页对不上。这里取全量，筛选交给本地。
     rows = []
     seen = set()
     for path in (PACKAGES_PATH_PAID, PACKAGES_PATH_FREE):
-        payload = {"PageNumber": 1, "PageSize": 100,
-                   "PackageCodes": meta["package_codes"], "Status": [0, 3]}
+        payload = {"PageNumber": 1, "PageSize": 200,
+                   "PackageCodes": meta["package_codes"], "Status": [0, 3],
+                   "IsDisplayTotalInfo": True}
         try:
             st, body = api_call(root, path, token, payload=payload)
         except Exception as e:
@@ -1228,6 +1236,7 @@ def fetch_credit_packages(base, token):
         if st != 200 or not isinstance(body, dict) or body.get("code") != 0:
             continue
         data = body.get("data") if isinstance(body.get("data"), dict) else {}
+        meta["total_count"] = max(meta["total_count"], int(data.get("TotalCount") or 0))
         for a in data.get("Accounts") or []:
             if not isinstance(a, dict):
                 continue
@@ -1265,6 +1274,18 @@ def fetch_credit_packages(base, token):
             # 循环包（周期结束早于扣减结束）真实节奏是「随周期刷新」，标记出来避免误导成过期
             rolling = bool(refresh_ts and expire_ts and refresh_ts < expire_ts)
             status = a.get("Status")
+            # 获取方式：官网积分页「获取方式」列。AccountAttributes 里
+            # grantReason 是可读文案（如「官方活动发放」「Buddy 加油站签到」），
+            # 缺失时回退 grantSource 机器码（如 daily_checkin）。
+            source_text, grant_source = "", ""
+            for attr in a.get("AccountAttributes") or []:
+                if not isinstance(attr, dict):
+                    continue
+                k, v = attr.get("Key"), attr.get("Value")
+                if k == "grantReason" and v:
+                    source_text = str(v)
+                elif k == "grantSource" and v:
+                    grant_source = str(v)
             rows.append({
                 "account_id": a.get("AccountId"),
                 "package_code": a.get("PackageCode"),
@@ -1274,6 +1295,9 @@ def fetch_credit_packages(base, token):
                 "total": round(total, 2),
                 "status": status,
                 "status_text": {0: "生效中", 3: "已用完"}.get(status, "状态%s" % status),
+                "source": source_text or grant_source or "未知来源",
+                "source_text": source_text,
+                "grant_source": grant_source,
                 "cycle_start": a.get("CycleStartTime") or "",
                 "cycle_end": a.get("CycleEndTime") or "",
                 "expire_at": _fmt_ts(expire_ts),
@@ -1283,13 +1307,18 @@ def fetch_credit_packages(base, token):
                 "refresh_at": _fmt_ts(refresh_ts),
                 "refresh_ts": refresh_ts,
                 "days_left": _days_left(expire_ts),
+                "expire_hint": _expire_hint(expire_ts)[1],
+                "expire_level": _expire_hint(expire_ts)[0],
             })
 
-    # 3) 排序：未用完的在前、按到期时间升序（最紧急最上）；已用完的沉底
+    # 3) 排序：纯按到期时间升序（对齐官网积分页的时间线顺序），
+    #    同刻到期的剩余多的在前，package_code 兜底保证稳定。
+    #    注意：**不要**把未用完的提到前面——那会让「使用中」基准行失去
+    #    前后文（前面没有已用完的历史流水），窗口展示会只剩 1-2 条。
     def _sort_key(r):
-        used_up = 1 if (r.get("status") == 3 or r.get("remain", 0) <= 0) else 0
         ts = r.get("expire_ts")
-        return (used_up, 0 if ts else 1, ts or 0)
+        return (0 if ts else 1, ts or 0, -r.get("remain", 0),
+                r.get("package_code") or "")
     rows.sort(key=_sort_key)
     return rows, meta
 
@@ -1298,9 +1327,34 @@ def _fmt_ts(ts):
     if not ts:
         return None
     try:
-        return time.strftime("%Y-%m-%d %H:%M", time.localtime(ts))
+        return time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(ts))
     except Exception:
         return None
+
+
+def _expire_hint(ts):
+    """到期紧迫度提示，对齐官网积分页的彩色角标。
+
+    返回 (level, text)：level 用于排序/着色（hot / warn / soon / ""），
+    text 为展示文案（24小时内过期 / 2天后到期 …），不紧迫时为空串。
+    """
+    if not ts:
+        return "", ""
+    remain = ts - time.time()
+    if remain <= 0:
+        return "expired", "已过期"
+    if remain <= 86400:
+        return "hot", "24小时内过期"
+    days = int(remain // 86400)
+    if days == 1:
+        return "warn", "1天后到期"
+    if days == 2:
+        return "warn", "2天后到期"
+    if days == 3:
+        return "warn", "3天后到期"
+    if days <= 7:
+        return "soon", "%d天后到期" % days
+    return "", ""
 
 
 def _days_left(ts):
@@ -1323,10 +1377,11 @@ def _arg_int(flag, default):
     return default
 
 
-def cmd_credits(expiring_days=None):
+def cmd_credits(expiring_days=None, html=False):
     """「积分到期」只读命令：列出各资源包剩余积分 + 到期时间，按最紧急排序。
 
     纯查询，不签到、不领取、不写任何本地状态；不影响签到主流程。
+    html=True 时输出可直接交给 show_widget 渲染的 HTML 片段（不打印 JSON）。
     """
     out = {"status": "ok", "action": "credits", "account_balance": None,
            "total_remaining": 0.0, "packages": [], "expiring_soon": [],
@@ -1338,46 +1393,234 @@ def cmd_credits(expiring_days=None):
         print(json.dumps(out, ensure_ascii=False, indent=2))
         return 1
 
-    base = "https://" + (domain or "www.codebuddy.cn") + "/v2"
+    base = "https://" + (domain or "www.workbuddy.cn") + "/v2"
     out["account_balance"] = fetch_account_balance(base, token)
     pkgs, meta = fetch_credit_packages(base, token)
     out["packages"] = pkgs
     out["meta"] = meta
     out["total_remaining"] = round(sum(p.get("remain", 0) for p in pkgs), 2)
 
+    live = [p for p in pkgs if p.get("status") != 3 and p.get("remain", 0) > 0]
     if expiring_days is not None:
         out["expiring_soon"] = [
-            p for p in pkgs
+            p for p in live
             if p.get("days_left") is not None and 0 <= p["days_left"] <= expiring_days
-            and p.get("remain", 0) > 0 and p.get("status") != 3
         ]
 
-    # 人类可读摘要
+    # 人类可读摘要：单表，以「使用中」的积分记录为基准，取前后各最多 10 条。
+    # 状态口径：
+    #   已用完  Status=3 或 remain<=0
+    #   使用中  Status!=3 且 0<remain<total（正在被消耗）
+    #   未使用  Status!=3 且 remain>=total（一分没动）
+    # 基准行 = 按到期时间升序时，"使用中"里第一笔；没有使用中的就退到第一笔未使用。
+    used_total = sum(p.get("total", 0) for p in pkgs)
+    remain_total = round(sum(p.get("remain", 0) for p in live), 2)
+    for p in pkgs:
+        total, remain = p.get("total", 0), p.get("remain", 0)
+        if p.get("status") == 3 or remain <= 0:
+            p["state"] = "已用完"
+        elif remain < total:
+            p["state"] = "使用中"
+        else:
+            p["state"] = "未使用"
+    out["total_used"] = round(used_total, 2)
+    out["window"] = _window_records(pkgs)
+
     lines = []
     if not pkgs:
-        lines.append("未取得资源包明细。" + ("；".join(meta.get("errors") or [])))
+        lines.append("未取得积分到期记录。" + ("；".join(meta.get("errors") or [])))
     else:
-        live = [p for p in pkgs if p.get("status") != 3 and p.get("remain", 0) > 0]
-        lines.append("账户可用余额 %s，共 %d 个有效资源包（另 %d 个已用完）"
-                     % (out["account_balance"], len(live), len(pkgs) - len(live)))
-        for p in live:
-            dl = p.get("days_left")
-            if dl is None:
-                when = "无到期时间"
-            elif dl < 0:
-                when = "已过期 %d 天" % (-dl)
-            elif dl == 0:
-                when = "今天到期"
-            elif p.get("expire_kind") == "周期刷新":
-                when = "%d 天后周期刷新（%s）" % (dl, p.get("expire_at"))
-            else:
-                when = "%d 天后到期（%s）" % (dl, p.get("expire_at"))
-            lines.append("  · %s 剩余 %s / %s — %s"
-                         % (p.get("package_name") or p.get("package_code"),
-                            p.get("remain"), p.get("total"), when))
+        lines.append("积分余额 %s / %s（共 %d 笔记录：%d 笔使用中，%d 笔未使用，%d 笔已用完）"
+                     % (remain_total, round(used_total, 2), len(pkgs),
+                        sum(1 for p in pkgs if p["state"] == "使用中"),
+                        sum(1 for p in pkgs if p["state"] == "未使用"),
+                        sum(1 for p in pkgs if p["state"] == "已用完")))
+        win = out["window"]
+        if win["records"]:
+            lines.append("按到期时间展示 %d 条（第 %d-%d 条 / 共 %d 条，基准：%s）"
+                         % (len(win["records"]), win["start"] + 1, win["end"],
+                            len(pkgs), win["anchor_time"]))
+        for i, p in enumerate(win["records"]):
+            when = _fmt_ts(p.get("expire_ts")) or "无到期时间"
+            hint = p.get("expire_hint") or ""
+            lines.append("  %s%s %-4s %-12s 剩 %s/%s%s"
+                         % (">" if win["records"] and win["start"] + i == win["anchor"] else " ",
+                            when, p["state"], p.get("source") or "未知来源",
+                            p.get("remain"), p.get("total"),
+                            ("  [%s]" % hint) if hint else ""))
     out["msg"] = "\n".join(lines)
-    print(json.dumps(out, ensure_ascii=False, indent=2))
+    if html:
+        print(render_credits_html(out))
+    else:
+        print(json.dumps(out, ensure_ascii=False, indent=2))
     return 0
+
+
+def _window_records(rows):
+    """以「使用中」的记录为基准，取其前 10 条 + 自身 + 后 10 条（最多 21 条）。
+
+    rows 已按到期时间升序（未用完在前、已用完在后）。基准取使用中里
+    最早到期的那笔；没有使用中就取第一笔未使用；都没有则取第一条。
+    返回 {records, anchor, start, end, anchor_time, truncated}。
+    """
+    if not rows:
+        return {"records": [], "anchor": 0, "start": 0, "end": 0,
+                "anchor_time": None, "truncated": False}
+    anchor = None
+    for want in ("使用中", "未使用"):
+        for i, r in enumerate(rows):
+            if r.get("state") == want:
+                anchor = i
+                break
+        if anchor is not None:
+            break
+    if anchor is None:
+        anchor = 0
+    start = max(0, anchor - 10)
+    end = min(len(rows), anchor + 11)
+    return {"records": rows[start:end], "anchor": anchor, "start": start,
+            "end": end, "anchor_time": _fmt_ts(rows[anchor].get("expire_ts")),
+            "truncated": len(rows) > (end - start)}
+
+
+STATE_STYLE = {
+    "使用中": ("#1D9E75", "#E1F5EE", "#04342C"),
+    "未使用": ("#185FA5", "#E6F1FB", "#042C53"),
+    "已用完": ("#888780", "#F1EFE8", "#444441"),
+}
+
+
+def _esc(text):
+    return (str(text if text is not None else "")
+            .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;"))
+
+
+def render_credits_html(out):
+    """把 credits 结果渲染成可交给 show_widget 的 HTML 片段。
+
+    设计口径：指标卡彩色（绿=可用/使用中、蓝=未使用、红=临期），
+    单表 + 状态色块，基准行（使用中）整行高亮并加左侧竖条。
+    只用 f-string / 字符串拼接，避免 HTML 里的 % 被当格式符。
+    """
+    pkgs = out.get("packages") or []
+    win = out.get("window") or {}
+    records = win.get("records") or []
+    remain_total = out.get("total_remaining") or 0
+    used_total = out.get("total_used") or 0
+    n_use = sum(1 for p in pkgs if p.get("state") == "使用中")
+    n_idle = sum(1 for p in pkgs if p.get("state") == "未使用")
+    n_done = sum(1 for p in pkgs if p.get("state") == "已用完")
+    soon = [p for p in pkgs if p.get("expire_level") in ("expired", "hot", "warn", "soon")]
+    soon_risk = [p for p in soon if p.get("expire_level") in ("expired", "hot", "warn")]
+    anchor_ts = records[win["anchor"] - win["start"]].get("expire_ts") if records else None
+    anchor_txt = _fmt_ts(anchor_ts) or "—"
+
+    cards = [
+        ("可用余额", f"{remain_total:.0f}", f"总额 {used_total:.0f}", "#1D9E75", "#E1F5EE"),
+        ("使用中", str(n_use), "正在消耗", "#0F6E56", "#EAF3DE"),
+        ("未使用", str(n_idle), "一分未动", "#185FA5", "#E6F1FB"),
+        ("临期 7 天内", str(len(soon_risk)), "含 24h 内", "#A32D2D", "#FCEBEB"),
+    ]
+    card_html = ""
+    for label, val, sub, color, bg in cards:
+        card_html += (
+            f'<div style="background:{bg};border-radius:var(--border-radius-md);'
+            f'padding:0.85rem 1rem;border-left:3px solid {color};">'
+            f'<div style="font-size:12px;color:{color};opacity:.8;margin-bottom:2px;">{label}</div>'
+            f'<div style="font-size:24px;font-weight:500;line-height:1.2;color:{color};">{val}</div>'
+            f'<div style="font-size:12px;color:{color};opacity:.65;margin-top:2px;">{sub}</div>'
+            f'</div>')
+
+    tr = ""
+    for i, p in enumerate(records):
+        idx = win["start"] + i
+        is_anchor = idx == win["anchor"]
+        st = p.get("state") or "已用完"
+        fg, bg, txt = STATE_STYLE.get(st, STATE_STYLE["已用完"])
+        hint = p.get("expire_hint") or ""
+        lvl = p.get("expire_level") or ""
+        hint_color = {"expired": "#A32D2D", "hot": "#A32D2D",
+                      "warn": "#BA7517", "soon": "#888780"}.get(lvl, "#B4B2A9")
+        remain, total = p.get("remain", 0), p.get("total", 0)
+        pct = int(round(remain / total * 100)) if total else 0
+        bar = (f'<div style="height:4px;border-radius:2px;background:rgba(0,0,0,.07);'
+               f'margin-top:4px;width:76px;margin-left:auto;">'
+               f'<div style="height:4px;border-radius:2px;width:{pct}%;background:{fg};"></div></div>')
+        row_style = ("background:#EAF3DE;" if is_anchor else "") + \
+            "border-bottom:0.5px solid var(--color-border-tertiary);"
+        marker = ('<span style="display:inline-block;width:3px;height:15px;background:#639922;'
+                  'border-radius:2px;margin-right:7px;vertical-align:-3px;"></span>'
+                  if is_anchor else '<span style="display:inline-block;width:3px;margin-right:7px;"></span>')
+        rem_txt = (f"{remain:.2f}").rstrip("0").rstrip(".")
+        tr += (
+            f'<tr style="{row_style}">'
+            f'<td style="padding:7px 8px;white-space:nowrap;font-family:var(--font-mono);'
+            f'font-size:12px;{"font-weight:500;" if is_anchor else ""}">'
+            f'{marker}{_fmt_ts(p.get("expire_ts")) or "—"}</td>'
+            f'<td style="padding:7px 8px;color:var(--color-text-secondary);font-size:12px;">'
+            f'{_esc(p.get("source") or "未知来源")}</td>'
+            f'<td style="padding:7px 8px;text-align:right;font-family:var(--font-mono);font-size:12px;">'
+            f'<span style="color:{fg};font-weight:500;">{rem_txt}</span>'
+            f'<span style="color:var(--color-text-tertiary);"> / {total:.0f}</span>{bar}</td>'
+            f'<td style="padding:7px 8px;font-size:12px;color:{hint_color};'
+            f'white-space:nowrap;text-align:center;">'
+            f'{_esc(hint) or "—"}</td>'
+            f'<td style="padding:7px 8px;white-space:nowrap;">'
+            f'<span style="display:inline-block;padding:2px 9px;border-radius:10px;font-size:12px;'
+            f'color:{txt};background:{bg};border:0.5px solid {fg};font-weight:500;">{st}</span></td>'
+            f'</tr>')
+
+    if win.get("truncated"):
+        note = (f'<div style="padding:9px 10px 2px;font-size:12px;color:var(--color-text-tertiary);'
+                f'border-top:0.5px solid var(--color-border-tertiary);margin-top:4px;">'
+                f'共 {len(pkgs)} 条记录，以「使用中」为基准展示第 {win["start"] + 1}-{win["end"]} 条</div>')
+    else:
+        note = ""
+
+    # 临期提示条：7 天内到期的记录若不在窗口内，在这里汇总说明（官网红字提示的等价物）
+    in_window_ids = {id(p) for p in records}
+    soon_out = [p for p in soon if id(p) not in in_window_ids]
+    soon_banner = ""
+    if soon_out:
+        n_out_risk = sum(1 for p in soon_out if p.get("remain", 0) > 0)
+        first_t = _fmt_ts(soon_out[0].get("expire_ts")) or ""
+        last_t = _fmt_ts(soon_out[-1].get("expire_ts")) or ""
+        range_txt = first_t[:10] if first_t == last_t[:10] else f"{first_t[:10]} ~ {last_t[:10]}"
+        risk_txt = (f"其中 {n_out_risk} 笔仍有剩余、不用即作废" if n_out_risk
+                    else "这些记录均已用完，余额已消耗完毕，不产生损失")
+        soon_banner = (f'<div style="background:#FCEBEB;border-radius:var(--border-radius-md);'
+                       f'padding:8px 12px;font-size:12px;color:#A32D2D;margin-bottom:8px;">'
+                       f'⚠ 另有 {len(soon_out)} 笔 {range_txt} 到期（未在下方窗口内）：{risk_txt}</div>')
+
+    err = ""
+    if out.get("status") == "error" or (out.get("meta") or {}).get("errors"):
+        msg = out.get("msg") or "；".join((out.get("meta") or {}).get("errors") or [])
+        err = (f'<div style="background:#FCEBEB;color:#A32D2D;border-radius:var(--border-radius-md);'
+               f'padding:10px 12px;font-size:13px;margin-bottom:12px;">{_esc(msg)}</div>')
+
+    sr = (f'<h2 class="sr-only" style="position:absolute;width:1px;height:1px;overflow:hidden;'
+          f'clip:rect(0,0,0,0);">积分余额 {remain_total:.2f}，共 {len(pkgs)} 笔记录，'
+          f'其中 {n_use} 笔使用中、{n_idle} 笔未使用、{n_done} 笔已用完。</h2>')
+    grid = (f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));'
+            f'gap:10px;margin-bottom:1rem;">{card_html}</div>')
+    head = (f'<div style="display:flex;justify-content:space-between;align-items:baseline;'
+            f'margin-bottom:8px;flex-wrap:wrap;gap:6px;">'
+            f'<span style="font-size:14px;font-weight:500;">积分到期明细</span>'
+            f'<span style="font-size:12px;color:var(--color-text-tertiary);">'
+            f'基准 {anchor_txt} · 前后各 10 条</span></div>')
+    thead = ('<thead><tr style="text-align:left;color:var(--color-text-tertiary);font-size:12px;'
+             'border-bottom:0.5px solid var(--color-border-secondary);">'
+             '<th style="padding:6px 8px;font-weight:400;">到期时间</th>'
+             '<th style="padding:6px 8px;font-weight:400;">获取方式</th>'
+             '<th style="padding:6px 8px;font-weight:400;text-align:right;">剩余 / 总量</th>'
+             '<th style="padding:6px 8px;font-weight:400;text-align:center;">到期提示</th>'
+             '<th style="padding:6px 8px;font-weight:400;">状态</th>'
+             '</tr></thead>')
+    table = (f'<div style="background:var(--color-background-primary);border:0.5px solid '
+             f'var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:0.75rem 1rem;">'
+             f'{head}{soon_banner}<table style="width:100%;border-collapse:collapse;table-layout:auto;">'
+             f'{thead}<tbody>{tr}</tbody></table>{note}</div>')
+    return sr + err + grid + table
 
 
 def _extract_balance(*bodies):
@@ -2070,6 +2313,7 @@ USAGE = (
     "  python workbuddy_checkin.py travel                # 只查派猫猫旅行状态（只读，不签到）\n"
     "  python workbuddy_checkin.py credits               # 查积分到期：各资源包剩余积分 + 到期时间（只读，按最紧急排序）\n"
     "  python workbuddy_checkin.py credits --expiring-days 7   # 只列 7 天内到期的积分\n"
+    "  python workbuddy_checkin.py credits --html        # 输出可视化 HTML 片段（交给 show_widget 渲染）\n"
     "  python workbuddy_checkin.py travel --travel-auto  # 只跑旅行闭环（不签到）\n"
     "  python workbuddy_checkin.py --travel-auto         # 显式开启旅行闭环（默认已开）\n"
     "  python workbuddy_checkin.py --location N          # 指定派遣地点（1-4，缺省随机）\n"
@@ -2164,7 +2408,8 @@ def main():
         sys.exit(0 if out.get("status") == "ok" else 1)
     # 积分到期查询（只读）：列出每个资源包的剩余积分与到期时间，按最紧急排序
     if "credits" in sys.argv[1:] or "--expire" in sys.argv[1:]:
-        sys.exit(cmd_credits(expiring_days=_arg_int("--expiring-days", None)))
+        sys.exit(cmd_credits(expiring_days=_arg_int("--expiring-days", None),
+                             html=("--html" in sys.argv)))
     check_only = "--check-only" in sys.argv
     no_notify = "--no-notify" in sys.argv
     travel_only = "travel" in sys.argv[1:]

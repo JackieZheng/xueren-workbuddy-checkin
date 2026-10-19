@@ -6,7 +6,7 @@ description: 读取本机已登录 WorkBuddy 的登录态，直接调用官方�
 slug: xueren-workbuddy-checkin
 displayName: 雪人老师·WorkBuddy签到助手
 summary: 读取本机已登录 WorkBuddy 的登录态，直接调用官方接口完成每日签到与派猫猫旅行闭环，支持旅行奖励自动领取、积分到期盘点与多渠道推送。
-version: 1.3.5
+version: 1.3.6
 author: 雪人
 license: MIT
 display_name: xueren-workbuddy-checkin

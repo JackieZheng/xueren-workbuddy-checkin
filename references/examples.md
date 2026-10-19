@@ -263,10 +263,22 @@ workbuddy_checkin.py --confirm-paid                  # 放行付费渠道（短�
 
 启动器 `boot_checkin.ps1` 会采用持续轮询策略等待 `WorkBuddy.exe` 就绪（每 30s 检测一次，最长 30 分钟；WB 未起时只轮询不空跑，就绪后执行 `boot-catchup`），再执行补签；本地状态显示今日已成功则直接跳过，不会同天重复弹窗/重派。5.6.2+ 加密登录态解密默认通过环境变量/密钥文件/DPAPI 落盘密钥/明文兜底登录态定位密钥；如需从运行中客户端取密钥，须显式开启 `WORKBUDDY_ENABLE_ATREST_MEMSCAN=1`（默认关闭）。
 
+#### 旅行奖励自动领取触发器（travel-watch，推荐）
+
+Buddy 旅行单程约 2 小时，仅靠每日一次的签到闭环意味着归来后奖励要挂到第二天才领。装一个每 10 分钟重复的计划任务即可闭环：
+
+1. 把技能包内的 `scripts/travel_watch.ps1` 与 `scripts/travel_watch.vbs` 复制到 `~/.workbuddy/scripts/`；
+2. 用 PowerShell 跑一次 `scripts/install_travel_watch_task.ps1`
+   （`powershell -NoProfile -ExecutionPolicy Bypass -File "<技能目录>\scripts\install_travel_watch_task.ps1"`），
+   会注册「WorkBuddy签到-旅行自动领取」任务，触发器=每 10 分钟重复（电池供电也执行，单次超时 5 分钟自动终止）。
+
+任务每次静默执行 `travel-watch`：已到达（arrived）→ 立即 `travel/claim` 领取积分；空闲且未达每日派遣上限 → 自动再派出；旅行中/已达上限 → 什么都不做。**仅在真正领到奖励或成功派出时才弹系统通知**，高频轮询不会刷屏；异常退出才写 `~/.workbuddy/scripts/travel_watch.log`，常规摘要随 `checkin.log` 记录。停用：`Disable-ScheduledTask -TaskName 'WorkBuddy签到-旅行自动领取'`；卸载：`Unregister-ScheduledTask -TaskName 'WorkBuddy签到-旅行自动领取' -Confirm:$false`。
+
 ### 卸载 / 暂停
 
 - **暂停每日自动签到**：在 WorkBuddy「自动化」列表把「WorkBuddy签到助手 · 每日自动签到」设为暂停（PAUSED）或删除，不影响脚本本身。
 - **卸载本 Skill**：删除技能目录 `~/.workbuddy/skills/xueren-workbuddy-checkin/`，必要时一并删除脚本副本 `~/.workbuddy/scripts/workbuddy_checkin.py` 与 `push_message.py`。
+- **卸载旅行自动领取任务**：`Unregister-ScheduledTask -TaskName 'WorkBuddy签到-旅行自动领取' -Confirm:$false`（或先 `Disable-ScheduledTask` 暂停）。
 - **清理推送痕迹**（可选）：删除 `~/.workbuddy/scripts/notify_config.json`（含密钥）与 `~/.workbuddy/scripts/notifications.jsonl`（`system` 渠道的本地记录）。
 - 彻底移除 = 暂停自动化 + 删除技能目录 + 删除脚本副本，无残留系统服务。
 

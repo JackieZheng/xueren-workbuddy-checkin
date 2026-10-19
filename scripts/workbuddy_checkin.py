@@ -52,6 +52,7 @@ WorkBuddy签到助手（每日自动签到脚本，接口直签，无需 GUI 点
   python workbuddy_checkin.py --check-only     # 仅查询状态（只读，不领取、不写旅行）
   python workbuddy_checkin.py travel           # 只查派猫猫旅行状态（只读）
   python workbuddy_checkin.py travel --travel-auto      # 只跑旅行闭环（不签到）
+  python workbuddy_checkin.py travel-watch       # 旅行奖励自动领取（计划任务用，无动作静默）
   python workbuddy_checkin.py --travel-auto    # 显式开启旅行闭环（默认已开）
   python workbuddy_checkin.py --location N     # 指定派遣地点（1-4，缺省随机）
   python workbuddy_checkin.py --no-notify      # 跳过全部推送与桌面通知（调试用）
@@ -122,7 +123,7 @@ STATUS_PATH = "/billing/meter/checkin-activity-status"
 CHECKIN_PATH = "/billing/meter/daily-checkin"
 HTTP_TIMEOUT = 10
 MAX_RETRY = 1
-VERSION = "3.2.3-xueren"
+VERSION = "3.2.5-xueren"
 
 # 推送渠道覆盖（由命令行 --push-channels 设定，None=用配置里全部已就绪渠道）
 _PUSH_CHANNELS = None
@@ -2088,6 +2089,41 @@ def _run_travel(token, auto=True, location_id=None):
     return parsed
 
 
+def cmd_travel_watch():
+    """旅行奖励自动领取（计划任务每 10 分钟调用，无对话环境靠日志核查）。
+
+    跑 travel_auto 闭环：已到达(arrived) → 领取积分；空闲且未达每日上限 → 派出。
+    与签到主流程的区别：仅在「本次真正产生动作」（领到奖励 / 成功派出）时才弹
+    系统通知，旅行中/已达上限等无动作场景静默写日志，避免高频轮询刷屏。
+    """
+    try:
+        token, _domain, _path = load_token_best()
+    except Exception as e:
+        out = {"status": "error", "action": "travel_watch",
+               "msg": "登录态读取失败: %s" % e}
+        write_log(out)
+        print(json.dumps(out, ensure_ascii=False))
+        return 1
+
+    res = travel_auto(token)
+    log = [str(x) for x in (res.get("log") or [])]
+    acted = any(("已领取" in x) or ("已派出" in x) for x in log)
+    ok = bool(res.get("available"))
+    out = {"status": "ok" if ok else "error", "action": "travel_watch",
+           "acted": acted,
+           "msg": "；".join(log) if log else "无旅行动作",
+           "travel_log": log}
+    write_log(out)
+    if ok and acted:
+        try:
+            notify_system({"status": "ok", "action": "travel_claim",
+                           "msg": out["msg"]})
+        except Exception:
+            pass  # 通知失败绝不影响领取结果
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0 if ok else 1
+
+
 def _append_travel_msg(msg, travel):
     """把旅行状态拼进主消息，便于桌面通知与日志一眼看全。"""
     parts = []
@@ -2169,9 +2205,17 @@ def run(check_only=False, do_checkin=True, travel_mode="auto", location_id=None)
 
 
 def write_log(res):
-    """把每次运行结果追加写入脚本同目录的 checkin.log（本地核查用，不含 token）。"""
+    """把每次运行结果追加写入用户级运行目录的 checkin.log（本地核查用，不含 token）。
+
+    固定落 `~/.workbuddy/scripts/checkin.log`（与 travel_watch.log 同目录的用户级运行产物），
+    不随 skill 目录——避免运行日志被打进发布包/备份库；目录不存在时静默跳过。
+    """
     try:
-        log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkin.log")
+        log_dir = os.path.join(os.path.expanduser("~"), ".workbuddy", "scripts")
+        if os.path.isdir(log_dir):
+            log_path = os.path.join(log_dir, "checkin.log")
+        else:
+            log_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "checkin.log")
         line = "%s | status=%s | action=%s | msg=%s\n" % (
             time.strftime("%Y-%m-%d %H:%M:%S"),
             res.get("status"), res.get("action"), res.get("msg"))
@@ -2315,6 +2359,7 @@ USAGE = (
     "  python workbuddy_checkin.py credits --expiring-days 7   # 只列 7 天内到期的积分\n"
     "  python workbuddy_checkin.py credits --html        # 输出可视化 HTML 片段（交给 show_widget 渲染）\n"
     "  python workbuddy_checkin.py travel --travel-auto  # 只跑旅行闭环（不签到）\n"
+    "  python workbuddy_checkin.py travel-watch   # 旅行奖励自动领取（计划任务用，无动作静默）\n"
     "  python workbuddy_checkin.py --travel-auto         # 显式开启旅行闭环（默认已开）\n"
     "  python workbuddy_checkin.py --location N          # 指定派遣地点（1-4，缺省随机）\n"
     "  python workbuddy_checkin.py --no-notify           # 跳过全部推送与桌面通知（调试用）\n"
@@ -2406,6 +2451,9 @@ def main():
         print(json.dumps(out, ensure_ascii=False, indent=2))
         write_log(out)
         sys.exit(0 if out.get("status") == "ok" else 1)
+    # 旅行奖励自动领取（计划任务高频调用）：到达即领、空闲即派，无动作时静默
+    if "travel-watch" in sys.argv[1:]:
+        sys.exit(cmd_travel_watch())
     # 积分到期查询（只读）：列出每个资源包的剩余积分与到期时间，按最紧急排序
     if "credits" in sys.argv[1:] or "--expire" in sys.argv[1:]:
         sys.exit(cmd_credits(expiring_days=_arg_int("--expiring-days", None),

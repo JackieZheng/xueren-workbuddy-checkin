@@ -8,7 +8,9 @@ $ErrorActionPreference = "SilentlyContinue"
 
 # 通用路径：WorkBuddy 用户数据固定位于 %USERPROFILE%\.workbuddy，不再写死用户名
 $wbRoot = Join-Path $env:USERPROFILE ".workbuddy"
-$script = Join-Path $wbRoot "scripts\workbuddy_checkin.py"
+# 优先用技能目录的最新脚本；技能被卸载时才回退到本目录部署副本
+$script = Join-Path $wbRoot "skills\xueren-workbuddy-checkin\scripts\workbuddy_checkin.py"
+if (-not (Test-Path $script)) { $script = Join-Path $wbRoot "scripts\workbuddy_checkin.py" }
 $log    = Join-Path $wbRoot "scripts\boot_checkin.log"
 
 # 5.6.2+ 加密登录态：解密密钥默认走 环境变量/密钥文件/DPAPI 落盘密钥/明文兜底。
